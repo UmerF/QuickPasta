@@ -1,0 +1,67 @@
+Windows Registry Editor Version 5.00
+
+; ===== FOLDERS =====
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta]
+"MUIVerb"="Quick Pasta"
+"Icon"="Z:\\Game Tools\\.QuickPasta\\QuickPasta.ico"
+
+"SubCommands"=""
+
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShade]
+"MUIVerb"="ReShade"
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShade\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade\" -Target \"%V\""
+
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShadeNoAddon]
+"MUIVerb"="ReShade No Addon"
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShadeNoAddon\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade No Addon\" -Target \"%V\""
+
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShadeRenoDX]
+"MUIVerb"="ReShade RenoDX"
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShadeRenoDX\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX\" -Target \"%V\""
+
+; ===== FILES =====
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta]
+"MUIVerb"="Quick Pasta"
+"Icon"="Z:\\Game Tools\\.QuickPasta\\QuickPasta.ico"
+
+"SubCommands"=""
+
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShade]
+"MUIVerb"="ReShade"
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShade\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade\" -Target \"%1\""
+
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShadeNoAddon]
+"MUIVerb"="ReShade No Addon"
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShadeNoAddon\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade No Addon\" -Target \"%1\""
+
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShadeRenoDX]
+"MUIVerb"="ReShade RenoDX"
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShadeRenoDX\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX\" -Target \"%1\""
+
+; ===== BACKGROUND (empty space) =====
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta]
+"MUIVerb"="Quick Pasta"
+"Icon"="Z:\\Game Tools\\.QuickPasta\\QuickPasta.ico"
+
+"SubCommands"=""
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShade]
+"MUIVerb"="ReShade"
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShade\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade\" -Target \"%V\""
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShadeNoAddon]
+"MUIVerb"="ReShade No Addon"
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShadeNoAddon\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade No Addon\" -Target \"%V\""
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShadeRenoDX]
+"MUIVerb"="ReShade RenoDX"
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShadeRenoDX\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX\" -Target \"%V\""
