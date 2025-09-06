@@ -22,6 +22,11 @@ Windows Registry Editor Version 5.00
 [HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShadeRenoDX\command]
 @="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX\" -Target \"%V\""
 
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShadeRenoDXLive]
+"MUIVerb"="ReShade RenoDX (Live)"
+[HKEY_CLASSES_ROOT\Directory\shell\QuickPasta\shell\ReShadeRenoDXLive\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX (Live)\" -Target \"%V\""
+
 ; ===== FILES =====
 [HKEY_CLASSES_ROOT\*\shell\QuickPasta]
 "MUIVerb"="Quick Pasta"
@@ -44,6 +49,12 @@ Windows Registry Editor Version 5.00
 [HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShadeRenoDX\command]
 @="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX\" -Target \"%1\""
 
+; ===== FILES =====
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShadeRenoDXLive]
+"MUIVerb"="ReShade RenoDX (Live)"
+[HKEY_CLASSES_ROOT\*\shell\QuickPasta\shell\ReShadeRenoDXLive\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX (Live)\" -Target \"%1\""
+
 ; ===== BACKGROUND (empty space) =====
 [HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta]
 "MUIVerb"="Quick Pasta"
@@ -65,3 +76,8 @@ Windows Registry Editor Version 5.00
 "MUIVerb"="ReShade RenoDX"
 [HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShadeRenoDX\command]
 @="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX\" -Target \"%V\""
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShadeRenoDXLive]
+"MUIVerb"="ReShade RenoDX (Live)"
+[HKEY_CLASSES_ROOT\Directory\Background\shell\QuickPasta\shell\ReShadeRenoDXLive\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1\" -Profile \"ReShade RenoDX (Live)\" -Target \"%V\""
