@@ -1,4 +1,12 @@
-# QuickPastaManager.ps1 — same UI/behavior as your working build; VBS install without waiting
+# QuickPastaManager.ps1 - GUI for managing QuickPasta profiles
+#                   (c) 2025 by Umer Farooq
+# Usage: run this script with PowerShell 5.1+ (Windows 10+)
+# Note: requires .NET Framework 4.5+ (default on Windows 8+)
+# Note: requires Windows PowerShell, not PowerShell Core (6+)
+# Note: requires Windows Presentation Framework (WPF) - included with Windows
+# Note: requires 'profiles.json' in the same folder (created automatically if missing)
+# Note: requires 'Install_QuickPasta.vbs' and 'Uninstall_QuickPasta.vbs' in the same folder
+# Note: requires 'QuickPasta.ico' in the same folder (optional, for window icon)
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
 $ErrorActionPreference = 'Stop'
 
@@ -9,17 +17,47 @@ $InstallVbs   = Join-Path $ScriptDir 'Install_QuickPasta.vbs'
 $UninstallVbs = Join-Path $ScriptDir 'Uninstall_QuickPasta.vbs'
 $IcoPath      = Join-Path $ScriptDir 'QuickPasta.ico'
 
-# ---------- Strongly-typed row ----------
+# ---------- Strongly-typed row (C#5-safe) ----------
 Add-Type -TypeDefinition @"
 using System.ComponentModel;
-public class ProfileRow : INotifyPropertyChanged {
+
+public class ProfileRow : INotifyPropertyChanged
+{
   private string _name;
   private string _source;
-  public string Name { get => _name; set { _name = value; PropertyChanged?.Invoke(this,new PropertyChangedEventArgs(nameof(Name))); } }
-  public string Source { get => _source; set { _source = value; PropertyChanged?.Invoke(this,new PropertyChangedEventArgs(nameof(Source))); } }
+
+  public string Name
+  {
+    get { return _name; }
+    set
+    {
+      if (_name != value)
+      {
+        _name = value;
+        var h = PropertyChanged;
+        if (h != null) h(this, new PropertyChangedEventArgs("Name"));
+      }
+    }
+  }
+
+  public string Source
+  {
+    get { return _source; }
+    set
+    {
+      if (_source != value)
+      {
+        _source = value;
+        var h = PropertyChanged;
+        if (h != null) h(this, new PropertyChangedEventArgs("Source"));
+      }
+    }
+  }
+
   public event PropertyChangedEventHandler PropertyChanged;
 }
-"@
+"@ -Language CSharp
+
 
 # ---------- Helpers ----------
 function Load-Profiles {
@@ -65,9 +103,25 @@ function Build-RenamesText($rules) { if (-not $rules) { '' } else { ($rules | Fo
 
 function Pick-Folder([string]$startPath) {
   Add-Type -AssemblyName System.Windows.Forms
-  $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-  if ($startPath -and (Test-Path $startPath)) { $dlg.SelectedPath = $startPath }
-  if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.SelectedPath }
+
+  $dlg = New-Object System.Windows.Forms.OpenFileDialog
+  $dlg.Title = "Select a folder"
+  $dlg.Filter = "Folders|*.*"          # cosmetic; we're not picking a real file
+  $dlg.CheckFileExists = $false
+  $dlg.CheckPathExists = $true
+  $dlg.ValidateNames = $false
+  $dlg.FileName = "Select this folder" # fake file name to allow folder selection
+
+  if ($startPath -and (Test-Path $startPath)) {
+    $dlg.InitialDirectory = (Resolve-Path $startPath).Path
+  }
+
+  if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    # Strip the fake file name, return the chosen directory
+    $dir = [System.IO.Path]::GetDirectoryName($dlg.FileName)
+    if ([string]::IsNullOrEmpty($dir)) { $dir = [System.IO.Path]::GetPathRoot($dlg.FileName) }
+    return $dir
+  }
   return $null
 }
 
@@ -80,7 +134,7 @@ function Run-Vbs([string]$file) {
   [System.Diagnostics.Process]::Start($psi) | Out-Null
 }
 
-# ---------- XAML (same look you signed off on) ----------
+# ---------- XAML ----------
 $xaml = @"
 <Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
         xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
