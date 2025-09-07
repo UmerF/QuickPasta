@@ -2,56 +2,248 @@
   <img src="https://i.imgur.com/B8cPgXy.png" alt="QuickPasta logo" width="200"/>
 </p>
 
-A lightweight Windows right-click helper for quickly pasting predefined sets of files (e.g., ReShade presets) into any game folder.
+# 🍝 QuickPasta
+
+**QuickPasta** adds a **custom right-click context menu** to Windows Explorer that lets you instantly paste a prepared set of files from a local folder or a ZIP URL into the place you clicked.  
+It ships with a polished **GUI Manager** to create, reorder, and install your menu profiles—no manual registry edits, no terminals, fully portable.
 
 ---
 
-## Files in this repo
-- **Add_QuickPasta_Menu.reg** – installs the QuickPasta submenu into Explorer’s right-click menu  
-- **Remove_QuickPasta_Menu.reg** – removes the menu entries  
-- **profiles.json** – defines your copy “profiles” (name → source folder)  
-- **QuickPasta.ps1** – PowerShell script that does the actual copy based on the selected profile  
-- **QuickPasta.ico** – custom icon for the context menu  
+## ✨ Highlights
+
+- **Friendly GUI Manager (WPF)**
+  - Add / remove / save profiles (selecting a profile is edit mode—no extra “Edit” button).
+  - Reorder with ▲/▼ buttons or **Ctrl+↑ / Ctrl+↓**; order is preserved.
+  - **Apply + Install/Update** writes the classic Explorer context-menu submenu and shows a single confirmation dialog.
+  - **Uninstall Menu** removes every entry for the current user.
+
+- **Powerful profiles**
+  - Source can be a **local folder** or a **ZIP URL** (auto-download & extract).
+  - Optional **rename rules** (e.g., `ReShade64.dll -> dxgi.dll` or `*.cfg, settings.cfg`).
+  - Profiles are stored in `profiles.json` in the **same order** you see in the Manager.
+
+- **Portable & quiet**
+  - No installers, no services, no PATH changes.  
+  - Runs PowerShell invisibly via a small VBS launcher.  
+  - Small rotating logs for diagnostics.
 
 ---
 
-## How it works
-1. Edit `profiles.json` to point each profile to the folder you want to copy from.  
-2. Run `Add_QuickPasta_Menu.reg` to add **Quick Pasta → [profiles]** to your right-click menu.  
-   - Works on files, folders, and folder background.  
-   - On Windows 11, you’ll find it under **Show more options**.  
-3. Right-click your game folder or `.exe`, pick a QuickPasta profile, and the files are copied there automatically.  
-4. To remove the menu, run `Remove_QuickPasta_Menu.reg`.  
+## 📂 Project Layout
+Keep all files in the same folder:
+
+    QuickPasta\
+    ├── QuickPastaManager.ps1     # GUI Manager (WPF)
+    ├── QuickPasta.ps1            # Core logic (copy/ZIP/renames + logging)
+    ├── QuickPasta.vbs            # Hidden runner for PowerShell
+    ├── Install_QuickPasta.vbs    # One-click installer (writes registry; one confirmation)
+    ├── Uninstall_QuickPasta.vbs  # One-click uninstaller
+    ├── profiles.json             # Your profiles (saved in UI order)
+    └── QuickPasta.ico            # Icon for Explorer & the Manager
 
 ---
 
-## Changing paths for your system
-QuickPasta uses two sets of paths that may need to be customized:
+## ⚡ Installation
 
-1. **`profiles.json`**  
-   - Maps profile names (submenu labels) to source folders.  
-   - Example:
-     ```json
-     {
-       "ReShade": "D:\\Tools\\ReShade\\Copy Pasta",
-       "ReShade No Addon": "D:\\Tools\\ReShade\\Copy Pasta - No Addon"
-     }
-     ```
-   - Change the paths on the right-hand side to match your own folders.  
-   - Add or remove entries as you like—each one becomes a submenu option.  
+### Option A — Use the GUI (recommended)
 
-2. **Registry files (`.reg`)**  
-   - The `.reg` files contain paths to `QuickPasta.ps1`.  
-   - Since you will move the QuickPasta folder to another location, edit the `.reg` files with a text editor and update the paths.  
-   - Look for lines like:
-     ```
-     "Z:\\Game Tools\\.QuickPasta\\QuickPasta.ps1"
-     "Z:\\Game Tools\\.QuickPasta\\QuickPasta.ico"
-     ```
-     Replace them with the actual location on your system.  
+1. Place the folder anywhere (e.g., `D:\Tools\QuickPasta\`).
+2. Run **`QuickPastaManager.ps1`**.
+3. Add a profile:
+   - **Name** → label shown in the submenu.
+   - **Source** → a **local folder** or a **ZIP** URL (`https://…`).
+   - **Renames** → optional (one rule per line; see syntax below).
+4. Click **Save**.
+5. Reorder with ▲/▼ or **Ctrl+↑ / Ctrl+↓** (click the list to focus).
+6. Click **Apply + Install/Update** → a single “installed/updated” dialog appears.
+7. Right-click in Explorer → **Quick Pasta** submenu → choose a profile.
+
+To remove the menu later: open the Manager and click **Uninstall Menu**.
+
+### Option B — Script-only
+
+- Install **`Install_QuickPasta.vbs`** to (re)install from the current `profiles.json`.
 
 ---
 
-## Notes
-- Requires PowerShell (built into Windows 10/11).  
-- Copy behavior: overwrites existing files silently.  
+
+❌ Uninstall
+-----------
+
+*   In the Manager: **Uninstall Menu**
+    
+*   Or run: **Uninstall_QuickPasta.vbs**
+
+---
+
+## 👁️ Where You’ll See It
+
+- Right-click on **files**, **folders**, or a folder’s **background**.
+- On Windows 11, open the classic context menu via “Show more options” or (Shift+Right-Click).
+
+---
+
+## 🔤 **Rename Rules — Mini DSL**
+
+Write one rule per line in the Manager:
+
+    from -> to
+    from, to
+
+Rules run **after** the source has been copied into the target (post-copy).Only the **destination** is modified — your **source is never changed**.
+
+### Matching (left side: from)
+
+*   \* matches within a single path segment (non-recursive).
+    
+*   \*\* makes the rule **recursive** (any depth).
+    
+*   Without \*\*, patterns like shaders/\*.fxc match **only the top-level files** inside shaders\\ (not its subfolders).
+    
+
+### Destination behavior (right side: to)
+
+*   Ends with / → **move into folder** under the target root, **preserve filename**.
+    
+*   Contains / → treat as **relative path** under the target root (directories are created as needed).
+    
+*   Bare filename with a path on the left (e.g., textures/\*.cfg -> settings.cfg) → **move to target root** and rename to that filename.
+    
+*   Bare filename with no path on the left (e.g., ReShade64.dll -> dxgi.dll) → **rename in place** (same directory).
+    
+
+### Excludes / deletes
+
+Use the special action @delete on the right to remove matches:
+
+```
+**/notes.txt -> @delete
+shaders/**   -> @delete
+```
+
+> After deletes/moves, QuickPasta aggressively removes now-empty folders (including hidden/system “crumbs” like desktop.ini), and for full-tree deletes (e.g., shaders/\*\*) it also removes the base folder itself.
+
+### **Order matters**
+
+Put **move/rename rules first**, and your @delete rules **after**, so you don’t delete files you intend to move.
+
+## Quick reference
+
+| Intent                             | Rule                                    | Effect                                                   |
+| ---------------------------------- | --------------------------------------- | -------------------------------------------------------- |
+| Rename in place                    | `ReShade64.dll -> dxgi.dll`             | Same folder, new name                                    |
+| Move top-level matches to a folder | `shaders/*.fxc -> shaders_cache/`       | Create `shaders_cache\` if needed; keep filenames        |
+| Recursive move                     | `shaders/**/*.fxc -> shaders_cache/`    | Any depth; keep filenames                                |
+| Move & rename to a specific path   | `textures/readme.txt -> docs/guide.txt` | Create `docs\`; new leaf name                            |
+| Move to root with new name         | `textures/*.cfg -> settings.cfg`        | Root of target; last match wins                          |
+| Delete matches                     | `**/notes.txt -> @delete`               | Removes files; folder cleanup runs                       |
+| Delete whole subtree               | `shaders/** -> @delete`                 | Removes all files under `shaders\` and the folder itself |
+
+> Wildcards and subpaths are supported.
+
+### Common recipes
+
+**Rename in place**
+
+`ReShade64.dll -> dxgi.dll`
+
+**Move all top-level FXC files from shaders\\ into shaders\_cache\\**
+
+`shaders/*.fxc -> shaders_cache/`
+
+**Recursive move (any depth under shaders\\)**
+
+`shaders/**/*.fxc -> shaders_cache/`
+
+**Move top-level CFGs from textures\\ to target root and rename to settings.cfg**_(If multiple files match, the last one wins and overwrites.)_
+
+`textures/*.cfg -> settings.cfg`
+
+**Delete everything left in shaders\\ after your moves (and remove the folder itself)**
+
+`shaders/** -> @delete`
+
+**Delete every notes.txt anywhere**
+
+`**/notes.txt -> @delete`
+
+---
+
+🧠 How It Works (under the hood)
+--------------------------------
+
+*   **QuickPastaManager.ps1** edits profiles, keeps their **order**, and calls the installer/uninstaller.
+    
+*   **Install\_QuickPasta.vbs** reads profiles.json in order and registers the submenu.It silently writes numbered keys (e.g., 001\_…, 002\_…) to guarantee display order, while the **labels remain clean**.
+    
+*   **QuickPasta.vbs** launches **PowerShell hidden** with the selected profile and the clicked path.
+    
+*   **QuickPasta.ps1** copies local content or downloads & extracts ZIPs, applies renames, and logs.
+    
+*   **Uninstall\_QuickPasta.vbs** removes every QuickPasta menu entry for the current user.
+
+## 📝 `profiles.json` Examples
+
+> The Manager writes this file for you and preserves list order.  
+> You can still hand-edit it if you like.
+
+**Local folders**
+
+    {
+      "ReShade": "D:\\Tools\\ReShade\\Copy Pasta",
+      "ReShade No Addon": "D:\\Tools\\ReShade\\Copy Pasta - No Addon",
+      "ReShade RenoDX": "D:\\Tools\\ReShade\\Copy Pasta - RenoDX"
+    }
+    
+
+**Remote ZIP with renames**
+
+    {
+      "ReShade RenoDX (Live)": {
+        "source": "https://nightly.link/clshortfuse/reshade/workflows/renodx/renodx/ReShade%20(64-bit).zip",
+        "renames": [
+          { "from": "ReShade64.dll", "to": "dxgi.dll" },
+          { "from": "reshade.ini",   "to": "ReShade.ini" }
+        ]
+      }
+    }
+
+> Tip: JSON does **not** allow trailing commas. If you see errors, check your brackets/commas.
+
+
+🧾 Logging
+----------
+
+*   Log file: quickpasta.log (next to the scripts).
+    
+*   Rotates around **512 KB**; keeps the last ~400 lines.
+    
+*   Enable info-level logs in QuickPasta.ps1: `$LogInfoEnabled = $true`
+    
+⌨️ Shortcuts (Manager)
+----------------------
+
+*   **Ctrl+↑ / Ctrl+↓** — move the selected profile up/down.
+    
+*   Click the list once to give it keyboard focus so shortcuts work immediately.
+
+⚠️ Requirements
+---------------
+
+*   Windows **10/11**
+    
+*   PowerShell **5.1+** (built-in Windows)
+    
+*   .NET Framework **4.8** (for the WPF Manager)
+    
+
+After changing profiles or their order, click **Apply + Install/Update** to refresh the submenu.
+
+🐞 Troubleshooting
+------------------
+
+*   **Menu isn’t visible** → Use **Right-Click → Show more options** to check the classic menu, or use **Shift+Right-Click**.
+    
+*   **Order looks wrong** → Open the Manager, verify list order, then **Apply + Install/Update**.
+    
+*   **Invalid JSON** → The Manager warns if profiles.json can’t be parsed.
