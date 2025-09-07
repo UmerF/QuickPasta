@@ -1,8 +1,22 @@
-<p align="center">
-  <img src="https://i.imgur.com/B8cPgXy.png" alt="QuickPasta logo" width="200"/>
-</p>
-
-# 🍝 QuickPasta
+<!-- Side-by-side, no borders, vertically centered, responsive -->
+<table align="center" width="100%" style="border-collapse:collapse;border:none;">
+  <tr>
+    <td align="center" valign="middle" style="border:none;padding:0 20px 0 0;width:28%;">
+      <img
+        src="https://i.imgur.com/B8cPgXy.png"
+        alt="QuickPasta logo"
+        style="display:block;width:100%;max-width:180px;min-width:120px;height:auto;"
+      />
+    </td>
+    <td align="center" valign="middle" style="border:none;padding:0;width:72%;">
+      <img
+        src="https://i.imgur.com/IpMLNtP.gif"
+        alt="QuickPasta demo"
+        style="display:block;width:100%;max-width:800px;height:auto;"
+      />
+    </td>
+  </tr>
+</table>
 
 **QuickPasta** adds a **custom right-click context menu** to Windows Explorer that lets you instantly paste a prepared set of files from a local folder or a ZIP URL into the place you clicked.  
 It ships with a polished **GUI Manager** to create, reorder, and install your menu profiles—no manual registry edits, no terminals, fully portable.
@@ -26,20 +40,6 @@ It ships with a polished **GUI Manager** to create, reorder, and install your me
   - No installers, no services, no PATH changes.  
   - Runs PowerShell invisibly via a small VBS launcher.  
   - Small rotating logs for diagnostics.
-
----
-
-## 📂 Project Layout
-Keep all files in the same folder:
-
-    QuickPasta\
-    ├── QuickPastaManager.ps1     # GUI Manager (WPF)
-    ├── QuickPasta.ps1            # Core logic (copy/ZIP/renames + logging)
-    ├── QuickPasta.vbs            # Hidden runner for PowerShell
-    ├── Install_QuickPasta.vbs    # One-click installer (writes registry; one confirmation)
-    ├── Uninstall_QuickPasta.vbs  # One-click uninstaller
-    ├── profiles.json             # Your profiles (saved in UI order)
-    └── QuickPasta.ico            # Icon for Explorer & the Manager
 
 ---
 
@@ -166,6 +166,21 @@ Put **move/rename rules first**, and your @delete rules **after**, so you don�
 **Delete every notes.txt anywhere**
 
 `**/notes.txt -> @delete`
+
+---
+
+## 📂 Project Layout
+Keep all files in the same folder:
+
+    QuickPasta\
+    ├── QuickPastaManager.ps1     # GUI Manager (WPF)
+    ├── QuickPasta.ps1            # Core logic (copy/ZIP/renames + logging)
+    ├── QuickPasta.vbs            # Hidden runner for PowerShell
+    ├── Install_QuickPasta.vbs    # One-click installer (writes registry; one confirmation)
+    ├── Uninstall_QuickPasta.vbs  # One-click uninstaller
+    ├── profiles.json             # Your profiles (saved in UI order)
+    └── QuickPasta.ico            # Icon for Explorer & the Manager
+
 
 ---
 
