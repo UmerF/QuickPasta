@@ -267,8 +267,16 @@ try {
   if (!(Test-Path -LiteralPath $sourcePath)) { throw "Source not found: $sourcePath" }
 
   # Copy contents into target (never mutate source)
-  Copy-Item -Path (Join-Path $sourcePath '*') -Destination $targetPath -Recurse -Force
-  LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+  $itemsToCopy = @(Get-ChildItem -LiteralPath $sourcePath -Force)
+  if ($itemsToCopy.Count -eq 0) {
+    LogInfo "Source empty: $sourcePath (nothing to copy)"
+  }
+  else {
+    foreach ($item in $itemsToCopy) {
+      Copy-Item -LiteralPath $item.FullName -Destination $targetPath -Recurse -Force
+    }
+    LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+  }
 
   # Apply renames only in destination tree
   Invoke-ApplyRenames -root $targetPath -rules $renameRules
