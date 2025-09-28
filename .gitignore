@@ -5,7 +5,10 @@ QuickPasta.code-workspace
 profiles.json
 
 # Confidential artifacts
-Confidential/
+Confidential
 
 # 7-Zip Download folder
 7Zip
+
+#Loggin
+quickpasta.log

@@ -1,4 +1,4 @@
-﻿# QuickPastaManager.ps1 - GUI for managing QuickPasta profiles
+# QuickPastaManager.ps1 - GUI for managing QuickPasta profiles
 #                   (c) 2025 by Umer Farooq
 # Usage: run this script with PowerShell 5.1+ (Windows 10+)
 # Note: requires .NET Framework 4.5+ (default on Windows 8+)
@@ -94,12 +94,53 @@ function Parse-Renames([string]$text) {
     if ($s -match '^\s*(.+?)\s*->\s*(.+?)\s*$') { $from=$matches[1].Trim(); $to=$matches[2].Trim() }
     elseif ($s -match '^\s*([^,]+?)\s*,\s*(.+?)\s*$') { $from=$matches[1].Trim(); $to=$matches[2].Trim() }
     else { continue }
-    $rules.Add([pscustomobject]@{ from=$from; to=$to }) | Out-Null
+
+    $sourceHint = $null
+    if ($from -imatch '^@include\s+(.+)$') {
+      $sourceHint = ($matches[1]).Trim()
+      $sourceHint = $sourceHint.Trim("'").Trim('\"')
+      if ([string]::IsNullOrWhiteSpace($sourceHint)) { $sourceHint = $null }
+      $from = '@include'
+    }
+    elseif ($from -ieq '@include') {
+      $from = '@include'
+    }
+
+    $rule = [pscustomobject]@{ from=$from; to=$to }
+    if ($sourceHint) { $rule | Add-Member -NotePropertyName 'source' -NotePropertyValue $sourceHint -Force }
+    $rules.Add($rule) | Out-Null
   }
   if ($rules.Count -eq 0) { return $null }
   return $rules.ToArray()
 }
-function Build-RenamesText($rules) { if (-not $rules) { '' } else { ($rules | ForEach-Object { "$($_.from) -> $($_.to)" }) -join [Environment]::NewLine } }
+function Build-RenamesText($rules) { if (-not $rules) { '' } else { ($rules | ForEach-Object {
+    $from = $_.from
+    if ($from -ieq '@include') {
+      $sourceHint = $null
+      foreach ($propName in 'source','include','path','fromPath') {
+        if ($_.PSObject.Properties[$propName]) {
+          $candidate = [string]$_.PSObject.Properties[$propName].Value
+          if (-not [string]::IsNullOrWhiteSpace($candidate)) { $sourceHint = $candidate; break }
+        }
+      }
+      if ($sourceHint) { $from = "@include $sourceHint" }
+    }
+    "$from -> $($_.to)"
+  }) -join [Environment]::NewLine } }
+
+function Test-IncludeOnlyRules($rules) {
+  if (-not $rules) { return $false }
+  $includeCount = 0
+  $nonIncludeCount = 0
+  foreach ($rule in $rules) {
+    if (-not $rule) { continue }
+    $fromValue = $null
+    try { $fromValue = [string]($rule | Select-Object -ExpandProperty from -ErrorAction Stop) } catch {}
+    if ([string]::IsNullOrWhiteSpace($fromValue)) { continue }
+    if ($fromValue.Trim() -ieq '@include') { $includeCount++ } else { $nonIncludeCount++ }
+  }
+  return ($includeCount -gt 0 -and $nonIncludeCount -eq 0)
+}
 
 function Pick-Folder([string]$startPath) {
   Add-Type -AssemblyName System.Windows.Forms
@@ -314,10 +355,19 @@ $xaml = @"
         <Button    Grid.Row='2' Grid.Column='2' Name='btnBrowse' Content='Browse' Style='{StaticResource BaseButton}' Margin='8,0,0,12'/>
         <TextBlock Grid.Row='3' Grid.Column='0' Grid.ColumnSpan='2' Text='Tip: source can be a local folder or a URL (ZIPs auto-extract)' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
         <CheckBox Grid.Row='3' Grid.Column='2' Name='chkExtract' Content='Extract non-zip URLs' Margin='8,0,0,8' VerticalAlignment='Center' />
-        <TextBlock Grid.Row='4' Grid.ColumnSpan='3' Text='Renames (optional)' Style='{StaticResource Label}'/>
+        <Grid Grid.Row='4' Grid.ColumnSpan='3'>
+          <Grid.ColumnDefinitions>
+           <ColumnDefinition Width='*'/>
+           <ColumnDefinition Width='Auto'/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column='0' Text='Renames (optional)' Style='{StaticResource Label}'/>
+          <Border Grid.Column='1' Name='badgeInclude' Background='#DBEAFE' BorderBrush='#2563EB' BorderThickness='1' CornerRadius='12' Padding='10,4' Margin='0,8,0,4' Visibility='Collapsed'>
+            <TextBlock Text='Include-only profile' Foreground='#1E3A8A' FontSize='12' FontWeight='SemiBold'/>
+          </Border>
+        </Grid>
         <Grid Grid.Row='5' Grid.ColumnSpan='3'>
           <TextBox Name='txtRen' AcceptsReturn='True' VerticalScrollBarVisibility='Auto' Style='{StaticResource TextInput}' MinHeight='220' VerticalAlignment='Stretch' TextWrapping='Wrap' Margin='0,0,0,6'/>
-          <TextBlock Name='hintRen' Text='Format: one per line —  ReShade64.dll -> dxgi.dll    or    *.cfg, settings.cfg' Foreground='{StaticResource Muted2}' Margin='8,0,0,12' VerticalAlignment='Bottom' IsHitTestVisible='False'/>
+          <TextBlock Name='hintRen' Text='Examples: ReShade64.dll -> dxgi.dll    |    @include shader.fx -> Game/shader.fx    |    *.cfg, settings.cfg' Foreground='{StaticResource Muted2}' Margin='8,0,0,12' VerticalAlignment='Bottom' IsHitTestVisible='False'/>
         </Grid>
         <StackPanel Grid.Row='7' Grid.ColumnSpan='3' Orientation='Horizontal' HorizontalAlignment='Right'>
           <Button Name='btnApplyInstall' Style='{StaticResource PrimaryButton}'  Content='Apply + Install/Update'/>
@@ -350,6 +400,7 @@ $txtSource  = $window.FindName('txtSource')
 $txtRen     = $window.FindName('txtRen')
 $chkExtract = $window.FindName('chkExtract')
 $hintRen    = $window.FindName('hintRen')
+$badgeInclude = $window.FindName('badgeInclude')
 $btnBrowse  = $window.FindName('btnBrowse')
 $btnAdd     = $window.FindName('btnAdd')
 $btnRemove  = $window.FindName('btnRemove')
@@ -358,6 +409,15 @@ $btnDown    = $window.FindName('btnDown')
 $btnSave    = $window.FindName('btnSave')
 $btnApply   = $window.FindName('btnApplyInstall')
 $btnUninst  = $window.FindName('btnUninstall')
+
+# Include badge helper
+$setIncludeBadge = {
+  param($rules)
+  if (-not $badgeInclude) { return }
+  if (Test-IncludeOnlyRules $rules) { $badgeInclude.Visibility = 'Visible' } else { $badgeInclude.Visibility = 'Collapsed' }
+}
+&$setIncludeBadge $null
+
 
 # ---------- Data ----------
 $Rows     = New-Object System.Collections.ObjectModel.ObservableCollection[ProfileRow]
@@ -397,16 +457,27 @@ $lv.Add_SizeChanged({ if ($initSized){ $cols=Get-Columns; if ($cols){ $gv,$c1,$c
 function Load-Selected {
   $script:SelectedProfileKey = $null
   $chkExtract.IsChecked = $false
-  if (-not $lv.SelectedItem) { $txtName.Clear(); $txtSource.Clear(); $txtRen.Clear(); return }
+  if (-not $lv.SelectedItem) {
+    $txtName.Clear()
+    $txtSource.Clear()
+    $txtRen.Clear()
+    &$setIncludeBadge $null
+    return
+  }
   $row  = [ProfileRow]$lv.SelectedItem
   $val  = $Profiles[$row.Name]
   $txtName.Text = $row.Name
-  if ($val -is [string]) { $txtSource.Text = $val; $txtRen.Text = '' }
+  if ($val -is [string]) {
+    $txtSource.Text = $val
+    $txtRen.Text    = ''
+    &$setIncludeBadge $null
+  }
   else {
     $src = [string]($val | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
     if (-not $src) { $src = [string]($val | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
     $txtSource.Text = $src
     $txtRen.Text    = Build-RenamesText ($val.renames)
+    &$setIncludeBadge ($val.renames)
     $extractValue = ($val | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
     if ($null -ne $extractValue) {
       try { $chkExtract.IsChecked = [System.Convert]::ToBoolean($extractValue) } catch { $chkExtract.IsChecked = $false }
@@ -416,10 +487,13 @@ function Load-Selected {
 }
 $lv.Add_SelectionChanged({ Load-Selected })
 
-# hint
-$updateHint = { $hintRen.Visibility = $(if ([string]::IsNullOrWhiteSpace($txtRen.Text)) { 'Visible' } else { 'Collapsed' }) }
-$txtRen.Add_TextChanged($updateHint); $txtRen.Add_GotFocus($updateHint); $txtRen.Add_LostFocus($updateHint)
-
+# hint + include badge
+$updateRenUi = {
+  $hintRen.Visibility = $(if ([string]::IsNullOrWhiteSpace($txtRen.Text)) { 'Visible' } else { 'Collapsed' })
+  $parsedRen = Parse-Renames $txtRen.Text
+  &$setIncludeBadge $parsedRen
+}
+$txtRen.Add_TextChanged($updateRenUi); $txtRen.Add_GotFocus($updateRenUi); $txtRen.Add_LostFocus($updateRenUi)
 # move ↑ / ↓
 function Move-Selected([int]$delta) {
   $i = $lv.SelectedIndex; if ($i -lt 0) { return }
@@ -444,7 +518,7 @@ $lv.Add_PreviewMouseDown({ $lv.Focus() })
 
 
 # add/remove/save
-$btnAdd.Add_Click({ $txtName.Text=''; $txtSource.Text=''; $txtRen.Text=''; $chkExtract.IsChecked=$false; $lv.SelectedIndex=-1; $script:SelectedProfileKey = $null; $txtName.Focus() })
+$btnAdd.Add_Click({ $txtName.Text=''; $txtSource.Text=''; $txtRen.Text=''; $chkExtract.IsChecked=$false; &$setIncludeBadge $null; $lv.SelectedIndex=-1; $script:SelectedProfileKey = $null; $txtName.Focus() })
 $btnRemove.Add_Click({ if (-not $lv.SelectedItem){return}; $name=([ProfileRow]$lv.SelectedItem).Name; $Profiles.Remove($name)|Out-Null; $Rows.Remove($lv.SelectedItem)|Out-Null })
 
 function Save-Current-ToMap {
@@ -458,6 +532,31 @@ function Save-Current-ToMap {
   $rules = Parse-Renames $txtRen.Text
   if ($rules) {
     $rules = [object[]]$rules
+    $includeRulesNeedingHint = @()
+    foreach ($rule in $rules) {
+      $fromValue = $null
+      try { $fromValue = [string]($rule | Select-Object -ExpandProperty from -ErrorAction Stop) } catch {}
+      if ($fromValue -and $fromValue.Trim() -ieq '@include') {
+        $hasHint = $false
+        foreach ($propName in 'source','include','path','fromPath') {
+          $prop = $rule.PSObject.Properties[$propName]
+          if ($prop -and -not [string]::IsNullOrWhiteSpace([string]$prop.Value)) { $hasHint = $true; break }
+        }
+        if (-not $hasHint) {
+          $destValue = [string]($rule | Select-Object -ExpandProperty to -ErrorAction SilentlyContinue)
+          if (-not [string]::IsNullOrWhiteSpace($destValue)) {
+            $normalizedDest = $destValue.Replace('\\','/')
+            if ($normalizedDest.Contains('/')) { $includeRulesNeedingHint += $destValue }
+          }
+        }
+      }
+    }
+    if ($includeRulesNeedingHint.Count -gt 0) {
+      $prompt  = "Some @include rules copy into subfolders. If you expect those entries to pull a differently named file, add a source hint (e.g., '@include shader.fx -> Game/shader.fx')."
+      $prompt += [Environment]::NewLine + [Environment]::NewLine + "Continue without hints?"
+      $choice = [System.Windows.MessageBox]::Show($prompt,'QuickPasta',[System.Windows.MessageBoxButton]::YesNo,[System.Windows.MessageBoxImage]::Question)
+      if ($choice -ne [System.Windows.MessageBoxResult]::Yes) { return $false }
+    }
     if ($extract) {
       $value = [pscustomobject]@{ source=$src; renames=$rules; extract=$true }
     } else {
@@ -484,7 +583,6 @@ function Save-Current-ToMap {
   return $true
 }
 $btnSave.Add_Click({ if (Save-Current-ToMap) { Save-Profiles; [System.Windows.MessageBox]::Show("Saved profiles.json","QuickPasta")|Out-Null } })
-
 # browse
 $btnBrowse.Add_Click({ $p = Pick-Folder $txtSource.Text; if ($p) { $txtSource.Text = $p } })
 
@@ -494,5 +592,5 @@ $btnUninst.Add_Click({ Run-Vbs $UninstallVbs })
 
 # ---------- Run ----------
 Refresh-Rows
-$updateHint.Invoke()
+$updateRenUi.Invoke()
 $null = $window.ShowDialog()

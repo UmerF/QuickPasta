@@ -142,6 +142,8 @@ Put **move/rename rules first**, and your @delete rules **after**, so you don�
 
 > Wildcards and subpaths are supported.
 
+> Use `@include <source> -> <destination>` when you only need a single file from a downloaded/extracted payload (for example, `@include ReShade64.dll -> dxgi.dll`). The Manager keeps whatever hint you specify, flags include-only profiles, and only prompts for a hint when the destination includes folders (meaning you plan to rename as you copy).
+
 ### Common recipes
 
 **Rename in place**
