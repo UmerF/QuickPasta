@@ -50,6 +50,9 @@ function Get-TargetFolder([string]$path) {
   if ($item.PSIsContainer) { $item.FullName } else { $item.DirectoryName }
 }
 
+function Test-Url([string]$s) { $s -match '^https?://\S+' }
+
+
 function Test-ZipUrl([string]$s) { ($s -match '^https?://' -and $s -match '\.zip($|\?)') }
 
 function Invoke-DownloadAndExtractZip([string]$url) {
@@ -67,6 +70,21 @@ function Invoke-DownloadAndExtractZip([string]$url) {
   Expand-Archive -LiteralPath $zipPath -DestinationPath $extract -Force
   LogInfo "Extracted to: $extract"
   @{ Source = $extract; Work = $workRoot }
+}
+
+function Invoke-DownloadFile([string]$url) {
+  try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+  $workRoot = Join-Path $env:TEMP ('QuickPasta_' + [guid]::NewGuid().ToString('N'))
+  $downloadDir = Join-Path $workRoot 'download'
+  $fileName = [System.IO.Path]::GetFileName(($url -split '\?')[0])
+  if ([string]::IsNullOrWhiteSpace($fileName)) { $fileName = 'payload' }
+  $filePath = Join-Path $downloadDir $fileName
+  New-Item -ItemType Directory -Path $workRoot -Force | Out-Null
+  New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+  LogInfo "Downloading file: $url"
+  Invoke-WebRequest -Uri $url -OutFile $filePath -UseBasicParsing
+  LogInfo "Downloaded file to: $filePath"
+  @{ Source = $downloadDir; Work = $workRoot }
 }
 
 function Remove-EmptyDirs([string]$root) {
@@ -255,11 +273,15 @@ try {
   # Resolve target
   $targetPath = Get-TargetFolder -path $Target
 
-  # Prepare source (zip vs. folder)
+  # Prepare source (URL vs. folder)
   $tempWork   = $null
   $sourcePath = $null
-  if (Test-ZipUrl $sourceSpec) {
-    $tempWork   = Invoke-DownloadAndExtractZip $sourceSpec
+  if (Test-Url $sourceSpec) {
+    if (Test-ZipUrl $sourceSpec) {
+      $tempWork = Invoke-DownloadAndExtractZip $sourceSpec
+    } else {
+      $tempWork = Invoke-DownloadFile $sourceSpec
+    }
     $sourcePath = $tempWork.Source
   } else {
     $sourcePath = $sourceSpec
