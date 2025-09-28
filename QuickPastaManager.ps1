@@ -312,7 +312,7 @@ $xaml = @"
         <TextBlock Grid.Row='2' Grid.Column='0' Text='Source' Style='{StaticResource Label}'/>
         <TextBox   Grid.Row='2' Grid.Column='1' Name='txtSource' Style='{StaticResource TextInput}'/>
         <Button    Grid.Row='2' Grid.Column='2' Name='btnBrowse' Content='Browse' Style='{StaticResource BaseButton}' Margin='8,0,0,12'/>
-        <TextBlock Grid.Row='3' Grid.ColumnSpan='3' Text='Tip: source can be a local folder or a ZIP URL (https://...)' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
+        <TextBlock Grid.Row='3' Grid.ColumnSpan='3' Text='Tip: source can be a local folder or a URL (ZIPs auto-extract)' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
         <TextBlock Grid.Row='4' Grid.ColumnSpan='3' Text='Renames (optional)' Style='{StaticResource Label}'/>
         <Grid Grid.Row='5' Grid.ColumnSpan='3'>
           <TextBox Name='txtRen' AcceptsReturn='True' VerticalScrollBarVisibility='Auto' Style='{StaticResource TextInput}' MinHeight='220' VerticalAlignment='Stretch' TextWrapping='Wrap' Margin='0,0,0,6'/>
@@ -438,7 +438,7 @@ function Save-Current-ToMap {
   $name = $txtName.Text.Trim()
   $src  = $txtSource.Text.Trim()
   if (-not $name) { [System.Windows.MessageBox]::Show("Name is required.","QuickPasta")|Out-Null; return $false }
-  if (-not $src)  { [System.Windows.MessageBox]::Show("Source is required (folder or ZIP URL).","QuickPasta")|Out-Null; return $false }
+  if (-not $src)  { [System.Windows.MessageBox]::Show("Source is required (folder or URL).","QuickPasta")|Out-Null; return $false }
   $original = $script:SelectedProfileKey
   if ($Profiles.Contains($name) -and $original -ne $name) { [System.Windows.MessageBox]::Show("A profile with that name already exists.","QuickPasta")|Out-Null; return $false }
   $rules = Parse-Renames $txtRen.Text
