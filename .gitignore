@@ -3,3 +3,6 @@ QuickPasta.code-workspace
 
 # Local profile definitions created by the manager
 profiles.json
+
+# Confidential artifacts
+Confidential/
