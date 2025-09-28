@@ -6,3 +6,6 @@ profiles.json
 
 # Confidential artifacts
 Confidential/
+
+# 7-Zip Download folder
+7Zip

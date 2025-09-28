@@ -32,7 +32,7 @@ It ships with a polished **GUI Manager** to create, reorder, and install your me
   - **Uninstall Menu** removes every entry for the current user.
 
 - **Powerful profiles**
-  - Source can be a **local folder** or a **ZIP URL** (auto-download & extract).
+  - Source can be a **local folder**, a **ZIP URL** (auto-download & extract), or any **HTTP(S) file** (with optional extraction).
   - Optional **rename rules** (e.g., `ReShade64.dll -> dxgi.dll` or `*.cfg, settings.cfg`).
   - Profiles are stored in `profiles.json` in the **same order** you see in the Manager.
 
@@ -50,9 +50,10 @@ It ships with a polished **GUI Manager** to create, reorder, and install your me
 1. Place the folder anywhere (e.g., `D:\Tools\QuickPasta\`).
 2. Run **`QuickPastaManager.ps1`**.
 3. Add a profile:
-   - **Name** → label shown in the submenu.
-   - **Source** → a **local folder** or a **ZIP** URL (`https://…`).
-   - **Renames** → optional (one rule per line; see syntax below).
+   - **Name** – label shown in the submenu.
+   - **Source** – a **local folder**, a **ZIP** URL (`https://...`), or any **HTTP(S)** file.
+   - **Extract non-zip URLs** – optional; enable this for self-extracting downloads you want unpacked automatically.
+   - **Renames** – optional (one rule per line; see syntax below).
 4. Click **Save**.
 5. Reorder with ▲/▼ or **Ctrl+↑ / Ctrl+↓** (click the list to focus).
 6. Click **Apply + Install/Update** → a single “installed/updated” dialog appears.
@@ -222,6 +223,22 @@ Keep all files in the same folder:
         ]
       }
     }
+
+**Self-extracting download**
+
+    {
+      "ReShade SFX (Live)": {
+        "source": "https://example.com/ReShadeSetup.exe",
+        "extract": true,
+        "renames": [
+          { "from": "ReShade64.dll", "to": "dxgi.dll" }
+        ]
+      }
+    }
+
+> Set `extract` to `true` (or check **Extract non-zip URLs** in the Manager) when you want QuickPasta to unpack a downloaded EXE before rename rules run. If extraction fails, the original file is copied instead.
+> QuickPasta first tries the built-in ZIP extractor and, if that fails, looks for `7z.exe` in Program Files, Program Files (x86), the script folder, or anything on your PATH. If nothing turns up it silently downloads a portable copy into `./7Zip/` and reuses it next time. If that still fails, the original executable is copied intact.
+
 
 > Tip: JSON does **not** allow trailing commas. If you see errors, check your brackets/commas.
 

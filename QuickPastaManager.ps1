@@ -312,7 +312,8 @@ $xaml = @"
         <TextBlock Grid.Row='2' Grid.Column='0' Text='Source' Style='{StaticResource Label}'/>
         <TextBox   Grid.Row='2' Grid.Column='1' Name='txtSource' Style='{StaticResource TextInput}'/>
         <Button    Grid.Row='2' Grid.Column='2' Name='btnBrowse' Content='Browse' Style='{StaticResource BaseButton}' Margin='8,0,0,12'/>
-        <TextBlock Grid.Row='3' Grid.ColumnSpan='3' Text='Tip: source can be a local folder or a URL (ZIPs auto-extract)' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
+        <TextBlock Grid.Row='3' Grid.Column='0' Grid.ColumnSpan='2' Text='Tip: source can be a local folder or a URL (ZIPs auto-extract)' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
+        <CheckBox Grid.Row='3' Grid.Column='2' Name='chkExtract' Content='Extract non-zip URLs' Margin='8,0,0,8' VerticalAlignment='Center' />
         <TextBlock Grid.Row='4' Grid.ColumnSpan='3' Text='Renames (optional)' Style='{StaticResource Label}'/>
         <Grid Grid.Row='5' Grid.ColumnSpan='3'>
           <TextBox Name='txtRen' AcceptsReturn='True' VerticalScrollBarVisibility='Auto' Style='{StaticResource TextInput}' MinHeight='220' VerticalAlignment='Stretch' TextWrapping='Wrap' Margin='0,0,0,6'/>
@@ -347,6 +348,7 @@ $lv         = $window.FindName('lvProfiles')
 $txtName    = $window.FindName('txtName')
 $txtSource  = $window.FindName('txtSource')
 $txtRen     = $window.FindName('txtRen')
+$chkExtract = $window.FindName('chkExtract')
 $hintRen    = $window.FindName('hintRen')
 $btnBrowse  = $window.FindName('btnBrowse')
 $btnAdd     = $window.FindName('btnAdd')
@@ -364,15 +366,21 @@ function Refresh-Rows {
   $Rows.Clear()
   foreach ($k in $Profiles.Keys) {
     $v = $Profiles[$k]
+    $src = $null
+    $extract = $false
     if ($v -is [string]) { $src = $v }
     else {
       $src = [string]($v | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
       if (-not $src) { $src = [string]($v | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
       if (-not $src) { $src = '' }
+      $extractValue = ($v | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
+      if ($null -ne $extractValue) {
+        try { $extract = [System.Convert]::ToBoolean($extractValue) } catch {}
+      }
     }
     $row = New-Object ProfileRow
     $row.Name   = $k
-    $row.Source = $src
+    $row.Source = if ($extract) { "$src (extract)" } else { $src }
     $Rows.Add($row) | Out-Null
   }
 }
@@ -388,6 +396,7 @@ $lv.Add_SizeChanged({ if ($initSized){ $cols=Get-Columns; if ($cols){ $gv,$c1,$c
 # selection sync
 function Load-Selected {
   $script:SelectedProfileKey = $null
+  $chkExtract.IsChecked = $false
   if (-not $lv.SelectedItem) { $txtName.Clear(); $txtSource.Clear(); $txtRen.Clear(); return }
   $row  = [ProfileRow]$lv.SelectedItem
   $val  = $Profiles[$row.Name]
@@ -398,6 +407,10 @@ function Load-Selected {
     if (-not $src) { $src = [string]($val | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
     $txtSource.Text = $src
     $txtRen.Text    = Build-RenamesText ($val.renames)
+    $extractValue = ($val | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
+    if ($null -ne $extractValue) {
+      try { $chkExtract.IsChecked = [System.Convert]::ToBoolean($extractValue) } catch { $chkExtract.IsChecked = $false }
+    }
   }
   $script:SelectedProfileKey = $row.Name
 }
@@ -431,7 +444,7 @@ $lv.Add_PreviewMouseDown({ $lv.Focus() })
 
 
 # add/remove/save
-$btnAdd.Add_Click({ $txtName.Text=''; $txtSource.Text=''; $txtRen.Text=''; $lv.SelectedIndex=-1; $script:SelectedProfileKey = $null; $txtName.Focus() })
+$btnAdd.Add_Click({ $txtName.Text=''; $txtSource.Text=''; $txtRen.Text=''; $chkExtract.IsChecked=$false; $lv.SelectedIndex=-1; $script:SelectedProfileKey = $null; $txtName.Focus() })
 $btnRemove.Add_Click({ if (-not $lv.SelectedItem){return}; $name=([ProfileRow]$lv.SelectedItem).Name; $Profiles.Remove($name)|Out-Null; $Rows.Remove($lv.SelectedItem)|Out-Null })
 
 function Save-Current-ToMap {
@@ -441,21 +454,31 @@ function Save-Current-ToMap {
   if (-not $src)  { [System.Windows.MessageBox]::Show("Source is required (folder or URL).","QuickPasta")|Out-Null; return $false }
   $original = $script:SelectedProfileKey
   if ($Profiles.Contains($name) -and $original -ne $name) { [System.Windows.MessageBox]::Show("A profile with that name already exists.","QuickPasta")|Out-Null; return $false }
+  $extract = ($chkExtract.IsChecked -eq $true)
   $rules = Parse-Renames $txtRen.Text
   if ($rules) {
     $rules = [object[]]$rules
-    $value = [pscustomobject]@{ source=$src; renames = $rules }
+    if ($extract) {
+      $value = [pscustomobject]@{ source=$src; renames=$rules; extract=$true }
+    } else {
+      $value = [pscustomobject]@{ source=$src; renames=$rules }
+    }
   }
   else {
-    $value = $src
+    if ($extract) {
+      $value = [pscustomobject]@{ source=$src; extract=$true }
+    } else {
+      $value = $src
+    }
   }
   if ($original -and $Profiles.Contains($original) -and $original -ne $name) { $Profiles.Remove($original) | Out-Null }
   $Profiles[$name] = $value
   $targetRow = $null
   if ($original) { $targetRow = $Rows | Where-Object Name -eq $original | Select-Object -First 1 }
   if (-not $targetRow) { $targetRow = $Rows | Where-Object Name -eq $name | Select-Object -First 1 }
-  if ($targetRow) { $targetRow.Name = $name; $targetRow.Source = $src }
-  else { $row = New-Object ProfileRow; $row.Name=$name; $row.Source=$src; $Rows.Add($row)|Out-Null; $targetRow = $row }
+  $displaySource = if ($extract) { "$src (extract)" } else { $src }
+  if ($targetRow) { $targetRow.Name = $name; $targetRow.Source = $displaySource }
+  else { $row = New-Object ProfileRow; $row.Name=$name; $row.Source=$displaySource; $Rows.Add($row)|Out-Null; $targetRow = $row }
   $lv.SelectedItem = $targetRow
   $script:SelectedProfileKey = $name
   return $true

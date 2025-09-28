@@ -50,7 +50,10 @@ function Get-TargetFolder([string]$path) {
   if ($item.PSIsContainer) { $item.FullName } else { $item.DirectoryName }
 }
 
+
 function Test-Url([string]$s) { $s -match '^https?://\S+' }
+
+
 
 
 function Test-ZipUrl([string]$s) { ($s -match '^https?://' -and $s -match '\.zip($|\?)') }
@@ -84,7 +87,273 @@ function Invoke-DownloadFile([string]$url) {
   LogInfo "Downloading file: $url"
   Invoke-WebRequest -Uri $url -OutFile $filePath -UseBasicParsing
   LogInfo "Downloaded file to: $filePath"
-  @{ Source = $downloadDir; Work = $workRoot }
+  @{ Source = $downloadDir; Work = $workRoot; File = $filePath }
+}
+
+function Find-SevenZipExe {
+  $candidates = @()
+  if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles '7-Zip\7z.exe' }
+  if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} '7-Zip\7z.exe' }
+  $candidates += Join-Path $scriptDir '7z.exe'
+  $candidates += Join-Path $scriptDir '7za.exe'
+  $candidates += Join-Path $scriptDir '7Zip\7z.exe'
+  $candidates += Join-Path $scriptDir '7Zip\7za.exe'
+
+  foreach ($dir in ($env:PATH -split ';')) {
+    if ([string]::IsNullOrWhiteSpace($dir)) { continue }
+    try { $candidates += Join-Path $dir '7z.exe' } catch {}
+  }
+  foreach ($candidate in $candidates) {
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  }
+  return $null
+}
+
+
+function Ensure-SevenZipPortable {
+  $portableDir = Join-Path $scriptDir '7Zip'
+  $portableExe = Join-Path $portableDir '7za.exe'
+  $existing = Find-SevenZipExe
+  if ($existing) { return $existing }
+  if (Test-Path -LiteralPath $portableExe) { return $portableExe }
+
+  $downloadUrl = 'https://www.7-zip.org/a/7za920.zip'
+  $archivePath = Join-Path $portableDir '7za.zip'
+
+  try {
+    New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+    LogInfo "Downloading portable 7-Zip"
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch {}
+
+    if (Test-Path -LiteralPath $portableDir) {
+      Get-ChildItem -LiteralPath $portableDir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like '7z*.exe' -or $_.Name -like '7z*.dll' } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    }
+
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($archivePath, $portableDir)
+
+    $exeTargets = Get-ChildItem -LiteralPath $portableDir -Recurse -Filter '7z*.exe' -ErrorAction SilentlyContinue
+    foreach ($exe in $exeTargets) {
+      if ($exe.DirectoryName -ne $portableDir) {
+        $dest = Join-Path $portableDir $exe.Name
+        try {
+          if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue }
+          Move-Item -LiteralPath $exe.FullName -Destination $dest -Force
+        } catch {}
+      }
+    }
+
+    $dllTargets = Get-ChildItem -LiteralPath $portableDir -Recurse -Filter '7z*.dll' -ErrorAction SilentlyContinue
+    foreach ($dll in $dllTargets) {
+      if ($dll.DirectoryName -ne $portableDir) {
+        $destDll = Join-Path $portableDir $dll.Name
+        try {
+          if (Test-Path -LiteralPath $destDll) { Remove-Item -LiteralPath $destDll -Force -ErrorAction SilentlyContinue }
+          Move-Item -LiteralPath $dll.FullName -Destination $destDll -Force
+        } catch {}
+      }
+    }
+
+    $candidate = Find-SevenZipExe
+    if ($candidate) {
+      LogInfo "Portable 7-Zip ready"
+      return $candidate
+    }
+  }
+  catch {
+    LogInfo ("Portable 7-Zip download failed: {0}" -f $_.Exception.Message)
+  }
+  finally {
+    if (Test-Path -LiteralPath $archivePath) {
+      Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+    }
+  }
+  return $null
+}
+
+function Invoke-IncludeRules([string]$sourceRoot, [string]$targetRoot, [object[]]$includeRules) {
+  if (-not $includeRules -or $includeRules.Count -eq 0) { return }
+
+  foreach ($rule in $includeRules) {
+    $targetRaw = [string]$rule.to
+    if ([string]::IsNullOrWhiteSpace($targetRaw)) { continue }
+
+    $targetNorm = ($targetRaw -replace '\\','/').Trim().TrimStart('/')
+    $sourceNorm = $null
+
+    foreach ($propName in 'source','include','path','fromPath') {
+      try {
+        $candidate = [string]($rule | Select-Object -ExpandProperty $propName -ErrorAction Stop)
+        if ($candidate) { $sourceNorm = $candidate; break }
+      }
+      catch {}
+    }
+
+    if (-not $sourceNorm) { $sourceNorm = $targetNorm }
+
+    $sourceNorm = ($sourceNorm -replace '\\','/').Trim().TrimStart('/')
+    $sourcePattern = ($sourceNorm -replace '/', '\\')
+    $sourceFull    = Join-Path $sourceRoot $sourcePattern
+
+    $matches = @()
+    if ($sourceNorm -match '[\*\?]') {
+      $sourceDir = Split-Path $sourceFull -Parent
+      if (-not $sourceDir) { $sourceDir = $sourceRoot }
+      $leaf = Split-Path $sourceFull -Leaf
+      $matches = @(Get-ChildItem -Path $sourceDir -Filter $leaf -File -Force -ErrorAction SilentlyContinue |
+                   Sort-Object LastWriteTime -Descending)
+    }
+    elseif (Test-Path -LiteralPath $sourceFull -PathType Leaf) {
+      $matches = ,(Get-Item -LiteralPath $sourceFull)
+    }
+
+    if ($matches.Count -eq 0) {
+      LogError ("Include source not found: {0}" -f (Join-Path $sourceRoot $sourceNorm))
+      continue
+    }
+
+    $chosen   = $matches[0]
+    $destFull = Join-Path $targetRoot ($targetNorm -replace '/', '\\')
+    $destDir  = Split-Path $destFull -Parent
+    if ($destDir -and -not (Test-Path -LiteralPath $destDir)) {
+      New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    }
+
+    try {
+      Copy-Item -LiteralPath $chosen.FullName -Destination $destFull -Force
+      LogInfo ("Include copy: '{0}' -> '{1}'" -f $chosen.FullName, $destFull)
+    }
+    catch {
+      LogError ("Include copy failed '{0}' -> '{1}': {2}" -f $chosen.FullName, $destFull, $_.Exception.Message)
+    }
+  }
+}
+function Invoke-SevenZipExtract([string]$SevenZipPath, [string]$FilePath, [string]$Destination) {
+  try {
+    if (Test-Path -LiteralPath $Destination) {
+      Remove-Item -LiteralPath $Destination -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $SevenZipPath
+    $psi.Arguments = "x -bd -y -o`"$Destination`" `"$FilePath`""
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.WaitForExit()
+    return ($proc.ExitCode -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+
+function Try-ExtractZipSfx([string]$filePath, [string]$extractDir, [string]$workRoot) {
+  $tempZip = $null
+  try {
+    if (-not ('QuickPasta.ZipSfxHelper' -as [type])) {
+      try {
+        Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+namespace QuickPasta {
+  public static class ZipSfxHelper {
+    private static readonly byte[] Signature = new byte[] { 0x50, 0x4B, 0x03, 0x04 };
+    public static bool CopyTailTo(string source, string destination) {
+      using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+        int match = 0;
+        int b;
+        while ((b = input.ReadByte()) != -1) {
+          if (b == Signature[match]) {
+            match++;
+            if (match == Signature.Length) {
+              long start = input.Position - Signature.Length;
+              input.Position = start;
+              using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None)) {
+                input.CopyTo(output);
+              }
+              return true;
+            }
+          }
+          else {
+            match = (b == Signature[0]) ? 1 : 0;
+          }
+        }
+      }
+      return false;
+    }
+  }
+}
+"@ -Language CSharp
+      }
+      catch {
+        LogInfo ("Failed to prepare SFX helper: {0}" -f $_.Exception.Message)
+        return $null
+      }
+    }
+
+    $tempZip = Join-Path $workRoot 'payload_sfx.zip'
+    if (-not [QuickPasta.ZipSfxHelper]::CopyTailTo($filePath, $tempZip)) {
+      return $null
+    }
+
+    if (Test-Path -LiteralPath $extractDir) {
+      Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch {}
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($tempZip, $extractDir)
+    LogInfo "Extracted file to: $extractDir (SFX zip tail)"
+    return $extractDir
+  }
+  catch {
+    LogInfo ("SFX extraction failed for {0}: {1}" -f $filePath, $_.Exception.Message)
+    return $null
+  }
+  finally {
+    if ($tempZip -and (Test-Path -LiteralPath $tempZip)) {
+      Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Try-ExtractDownload([string]$filePath, [string]$workRoot) {
+  $extractDir = Join-Path $workRoot 'extract'
+  $zipMessage = $null
+  try {
+    if (Test-Path -LiteralPath $extractDir) {
+      Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch {}
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($filePath, $extractDir)
+    LogInfo "Extracted file to: $extractDir"
+    return $extractDir
+  }
+  catch {
+    $zipMessage = $_.Exception.Message
+  }
+  try { if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
+  $sfxResult = Try-ExtractZipSfx -filePath $filePath -extractDir $extractDir -workRoot $workRoot
+  if ($sfxResult) { return $sfxResult }
+  $sevenZip = Find-SevenZipExe
+  if (-not $sevenZip) { $sevenZip = Ensure-SevenZipPortable }
+  if ($sevenZip) {
+    if (Invoke-SevenZipExtract -SevenZipPath $sevenZip -FilePath $filePath -Destination $extractDir) {
+      LogInfo "Extracted file to: $extractDir using 7-Zip ($sevenZip)"
+      return $extractDir
+    }
+  } else {
+    LogInfo "7z.exe not found while trying to extract $filePath; leaving original file"
+  }
+  if (-not $zipMessage) { $zipMessage = 'archive format not supported' }
+  LogInfo ("Extraction skipped for {0}: {1}" -f $filePath, $zipMessage)
+  return $null
 }
 
 function Remove-EmptyDirs([string]$root) {
@@ -104,7 +373,10 @@ function Invoke-ApplyRenames([string]$root, [object]$rules) {
   if (-not $rules) { return }
 
   # Normalize to a collection
-  if ($rules -isnot [System.Collections.IEnumerable] -or $rules -is [string]) {
+  if ($rules -is [System.Management.Automation.PSCustomObject]) {
+    $rules = @($rules)
+  }
+  elseif ($rules -isnot [System.Collections.IEnumerable] -or $rules -is [string]) {
     $rules = @($rules)
   }
 
@@ -257,6 +529,8 @@ try {
 
   $sourceSpec  = $null
   $renameRules = $null
+  $extractFlag = $false
+  $includeRules = @()
   if ($entry -is [string]) {
     $sourceSpec = $entry
   }
@@ -264,6 +538,22 @@ try {
     $sourceSpec  = [string]($entry | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
     if (-not $sourceSpec) { $sourceSpec = [string]($entry | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
     $renameRules =  ($entry | Select-Object -ExpandProperty renames -ErrorAction SilentlyContinue)
+    if ($renameRules -ne $null) {
+      if ($renameRules -is [System.Collections.IEnumerable] -and $renameRules -isnot [string]) {
+        $renameRules = @($renameRules)
+      }
+      else {
+        $renameRules = @($renameRules)
+      }
+      $includeRules = @($renameRules | Where-Object { ([string]$_.from).Trim() -ieq '@include' })
+      if ($includeRules.Count -gt 0) {
+        $renameRules = @($renameRules | Where-Object { ([string]$_.from).Trim() -ine '@include' })
+      }
+    }
+    $extractValue = ($entry | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
+    if ($null -ne $extractValue) {
+      try { $extractFlag = [System.Convert]::ToBoolean($extractValue) } catch {}
+    }
   }
   else {
     $sourceSpec = [string]$entry
@@ -281,6 +571,10 @@ try {
       $tempWork = Invoke-DownloadAndExtractZip $sourceSpec
     } else {
       $tempWork = Invoke-DownloadFile $sourceSpec
+      if ($extractFlag -and $tempWork.File) {
+        $extracted = Try-ExtractDownload $tempWork.File $tempWork.Work
+        if ($extracted) { $tempWork['Source'] = $extracted }
+      }
     }
     $sourcePath = $tempWork.Source
   } else {
@@ -288,16 +582,27 @@ try {
   }
   if (!(Test-Path -LiteralPath $sourcePath)) { throw "Source not found: $sourcePath" }
 
+  $includeOnly = ($includeRules.Count -gt 0 -and ($null -eq $renameRules -or $renameRules.Count -eq 0))
+
   # Copy contents into target (never mutate source)
-  $itemsToCopy = @(Get-ChildItem -LiteralPath $sourcePath -Force)
-  if ($itemsToCopy.Count -eq 0) {
-    LogInfo "Source empty: $sourcePath (nothing to copy)"
+  if (-not $includeOnly) {
+    $itemsToCopy = @(Get-ChildItem -LiteralPath $sourcePath -Force)
+    if ($itemsToCopy.Count -eq 0) {
+      LogInfo "Source empty: $sourcePath (nothing to copy)"
+    }
+    else {
+      foreach ($item in $itemsToCopy) {
+        Copy-Item -LiteralPath $item.FullName -Destination $targetPath -Recurse -Force
+      }
+      LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+    }
   }
   else {
-    foreach ($item in $itemsToCopy) {
-      Copy-Item -LiteralPath $item.FullName -Destination $targetPath -Recurse -Force
-    }
-    LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+    LogInfo "Include-only profile: skipping bulk copy from '$sourcePath'"
+  }
+
+  if ($includeRules.Count -gt 0) {
+    Invoke-IncludeRules -sourceRoot $sourcePath -targetRoot $targetPath -includeRules $includeRules
   }
 
   # Apply renames only in destination tree
@@ -314,3 +619,5 @@ finally {
   }
   LogInfo '---- QuickPasta run end ----'
 }
+
+
