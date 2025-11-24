@@ -13,7 +13,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $log       = Join-Path $scriptDir 'quickpasta.log'
 
 # $false = errors only (recommended), $true = info + errors
-$LogInfoEnabled = $false
+$LogInfoEnabled = $true
 # Max log size before rotation (bytes); set 0 to disable rotation
 $MaxLogBytes = 512KB
 
@@ -495,6 +495,69 @@ function Invoke-ApplyRenames([string]$root, [object]$rules) {
 
 function Normalize([string]$s) { ($s -replace '\s+',' ').Trim() }
 
+function To-BoolOrNull($value) {
+  try { return [System.Convert]::ToBoolean($value) } catch { return $null }
+}
+
+function Resolve-SourceEntries($entry) {
+  # Returns a list of objects @{ Source = "..."; Extract = $true/$false/$null }
+  $results = @()
+
+  # Legacy string -> single source
+  if ($entry -is [string]) {
+    $results += [pscustomobject]@{ Source = $entry; Extract = $null }
+    return $results
+  }
+
+  if ($entry -isnot [System.Management.Automation.PSCustomObject]) {
+    return $results
+  }
+
+  $globalExtract = To-BoolOrNull ($entry | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
+
+  # New multi-source array
+  $sourcesProp = $entry | Select-Object -ExpandProperty sources -ErrorAction SilentlyContinue
+  if ($sourcesProp) {
+    $list = @()
+    if ($sourcesProp -is [System.Collections.IEnumerable] -and $sourcesProp -isnot [string]) {
+      $list = @($sourcesProp)
+    } else {
+      $list = @($sourcesProp)
+    }
+    foreach ($s in $list) {
+      if ($s -is [string]) {
+        $srcVal = $s
+        if (-not [string]::IsNullOrWhiteSpace($srcVal)) {
+          $results += [pscustomobject]@{
+            Source  = $srcVal
+            Extract = $globalExtract
+          }
+        }
+        continue
+      }
+      if ($s -isnot [System.Management.Automation.PSCustomObject]) { continue }
+      $srcVal = [string]($s | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
+      if (-not $srcVal) { $srcVal = [string]($s | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
+      if (-not $srcVal) { continue }
+      $extractVal = To-BoolOrNull ($s | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
+      if ($extractVal -eq $null) { $extractVal = $globalExtract }
+      $results += [pscustomobject]@{
+        Source  = $srcVal
+        Extract = $extractVal
+      }
+    }
+    return $results
+  }
+
+  # Legacy object with single source/path
+  $single = [string]($entry | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
+  if (-not $single) { $single = [string]($entry | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
+  if ($single) {
+    $results += [pscustomobject]@{ Source = $single; Extract = $globalExtract }
+  }
+  return $results
+}
+
 # ========
 # Main
 # ========
@@ -527,16 +590,12 @@ try {
   $entry = $map[$chosenName]
   if ($null -eq $entry) { throw "Profile '$chosenName' not found in map." }
 
-  $sourceSpec  = $null
+  $sourceItems = @()
   $renameRules = $null
-  $extractFlag = $false
   $includeRules = @()
-  if ($entry -is [string]) {
-    $sourceSpec = $entry
-  }
-  elseif ($entry -is [System.Management.Automation.PSCustomObject]) {
-    $sourceSpec  = [string]($entry | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
-    if (-not $sourceSpec) { $sourceSpec = [string]($entry | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
+  $sourceItems = Resolve-SourceEntries -entry $entry
+
+  if ($entry -is [System.Management.Automation.PSCustomObject]) {
     $renameRules =  ($entry | Select-Object -ExpandProperty renames -ErrorAction SilentlyContinue)
     if ($renameRules -ne $null) {
       if ($renameRules -is [System.Collections.IEnumerable] -and $renameRules -isnot [string]) {
@@ -550,59 +609,68 @@ try {
         $renameRules = @($renameRules | Where-Object { ([string]$_.from).Trim() -ine '@include' })
       }
     }
-    $extractValue = ($entry | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
-    if ($null -ne $extractValue) {
-      try { $extractFlag = [System.Convert]::ToBoolean($extractValue) } catch {}
-    }
   }
-  else {
-    $sourceSpec = [string]$entry
+  elseif ($entry -is [string]) {
+    # already handled
   }
-  if (-not $sourceSpec) { throw "Profile '$chosenName' has no 'source' defined." }
+
+  if (-not $sourceItems -or $sourceItems.Count -eq 0) { throw "Profile '$chosenName' has no 'source' defined." }
 
   # Resolve target
   $targetPath = Get-TargetFolder -path $Target
 
-  # Prepare source (URL vs. folder)
-  $tempWork   = $null
-  $sourcePath = $null
-  if (Test-Url $sourceSpec) {
-    if (Test-ZipUrl $sourceSpec) {
-      $tempWork = Invoke-DownloadAndExtractZip $sourceSpec
-    } else {
-      $tempWork = Invoke-DownloadFile $sourceSpec
-      if ($extractFlag -and $tempWork.File) {
-        $extracted = Try-ExtractDownload $tempWork.File $tempWork.Work
-        if ($extracted) { $tempWork['Source'] = $extracted }
-      }
-    }
-    $sourcePath = $tempWork.Source
-  } else {
-    $sourcePath = $sourceSpec
-  }
-  if (!(Test-Path -LiteralPath $sourcePath)) { throw "Source not found: $sourcePath" }
-
   $includeOnly = ($includeRules.Count -gt 0 -and ($null -eq $renameRules -or $renameRules.Count -eq 0))
 
-  # Copy contents into target (never mutate source)
-  if (-not $includeOnly) {
-    $itemsToCopy = @(Get-ChildItem -LiteralPath $sourcePath -Force)
-    if ($itemsToCopy.Count -eq 0) {
-      LogInfo "Source empty: $sourcePath (nothing to copy)"
+  $tempWorkItems   = @()
+  $resolvedSources = @()
+
+  foreach ($src in $sourceItems) {
+    $sourceSpec = [string]$src.Source
+    $extractFlag = ($src.Extract -eq $true)
+    $tempWork   = $null
+    $sourcePath = $null
+
+    if (Test-Url $sourceSpec) {
+      if (Test-ZipUrl $sourceSpec) {
+        $tempWork = Invoke-DownloadAndExtractZip $sourceSpec
+      } else {
+        $tempWork = Invoke-DownloadFile $sourceSpec
+        if ($extractFlag -and $tempWork.File) {
+          $extracted = Try-ExtractDownload $tempWork.File $tempWork.Work
+          if ($extracted) { $tempWork['Source'] = $extracted }
+        }
+      }
+      $sourcePath = $tempWork.Source
+    } else {
+      $sourcePath = $sourceSpec
+    }
+
+    if (!(Test-Path -LiteralPath $sourcePath)) { throw "Source not found: $sourcePath" }
+
+    if ($tempWork) { $tempWorkItems += $tempWork }
+    $resolvedSources += [pscustomobject]@{ Path = $sourcePath }
+
+    if (-not $includeOnly) {
+      $itemsToCopy = @(Get-ChildItem -LiteralPath $sourcePath -Force)
+      if ($itemsToCopy.Count -eq 0) {
+        LogInfo "Source empty: $sourcePath (nothing to copy)"
+      }
+      else {
+        foreach ($item in $itemsToCopy) {
+          Copy-Item -LiteralPath $item.FullName -Destination $targetPath -Recurse -Force
+        }
+        LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+      }
     }
     else {
-      foreach ($item in $itemsToCopy) {
-        Copy-Item -LiteralPath $item.FullName -Destination $targetPath -Recurse -Force
-      }
-      LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+      LogInfo "Include-only profile: skipping bulk copy from '$sourcePath'"
     }
-  }
-  else {
-    LogInfo "Include-only profile: skipping bulk copy from '$sourcePath'"
   }
 
   if ($includeRules.Count -gt 0) {
-    Invoke-IncludeRules -sourceRoot $sourcePath -targetRoot $targetPath -includeRules $includeRules
+    foreach ($src in $resolvedSources) {
+      Invoke-IncludeRules -sourceRoot $src.Path -targetRoot $targetPath -includeRules $includeRules
+    }
   }
 
   # Apply renames only in destination tree
@@ -613,9 +681,11 @@ catch {
   exit 1
 }
 finally {
-  if ($tempWork -and (Test-Path -LiteralPath $tempWork.Work)) {
-    Remove-Item -LiteralPath $tempWork.Work -Recurse -Force -ErrorAction SilentlyContinue
-    LogInfo "Cleaned temp: $($tempWork.Work)"
+  foreach ($tempWork in $tempWorkItems) {
+    if ($tempWork -and (Test-Path -LiteralPath $tempWork.Work)) {
+      Remove-Item -LiteralPath $tempWork.Work -Recurse -Force -ErrorAction SilentlyContinue
+      LogInfo "Cleaned temp: $($tempWork.Work)"
+    }
   }
   LogInfo '---- QuickPasta run end ----'
 }

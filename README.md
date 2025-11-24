@@ -32,7 +32,7 @@ It ships with a polished **GUI Manager** to create, reorder, and install your me
   - **Uninstall Menu** removes every entry for the current user.
 
 - **Powerful profiles**
-  - Source can be a **local folder**, a **ZIP URL** (auto-download & extract), or any **HTTP(S) file** (with optional extraction).
+  - Source can be a **local folder**, a **ZIP URL** (auto-download & extract), or any **HTTP(S) file** (with optional extraction). Add **multiple sources in one profile** (processed in order).
   - Optional **rename rules** (e.g., `ReShade64.dll -> dxgi.dll` or `*.cfg, settings.cfg`).
   - Profiles are stored in `profiles.json` in the **same order** you see in the Manager.
 
@@ -51,7 +51,7 @@ It ships with a polished **GUI Manager** to create, reorder, and install your me
 2. Run **`QuickPastaManager.ps1`**.
 3. Add a profile:
    - **Name** – label shown in the submenu.
-   - **Source** – a **local folder**, a **ZIP** URL (`https://...`), or any **HTTP(S)** file.
+   - **Source** - a **local folder**, a **ZIP** URL (`https://...`), or any **HTTP(S)** file. Add multiple sources on separate lines.
    - **Extract non-zip URLs** – optional; enable this for self-extracting downloads you want unpacked automatically.
    - **Renames** – optional (one rule per line; see syntax below).
 4. Click **Save**.
@@ -222,6 +222,20 @@ Keep all files in the same folder:
         "renames": [
           { "from": "ReShade64.dll", "to": "dxgi.dll" },
           { "from": "reshade.ini",   "to": "ReShade.ini" }
+        ]
+      }
+    }
+
+**Multiple sources in one profile (processed in order)**
+
+    {
+      "ReShade + DLSS Bundle": {
+        "sources": [
+          "D:\\Tools\\ReShade\\Copy Pasta",
+          { "source": "https://example.com/dlss-pack.zip" }
+        ],
+        "renames": [
+          { "from": "ReShade64.dll", "to": "dxgi.dll" }
         ]
       }
     }

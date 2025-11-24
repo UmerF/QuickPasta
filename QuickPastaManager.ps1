@@ -142,6 +142,61 @@ function Test-IncludeOnlyRules($rules) {
   return ($includeCount -gt 0 -and $nonIncludeCount -eq 0)
 }
 
+function To-BoolOrNull($v) {
+  try { return [System.Convert]::ToBoolean($v) } catch { return $null }
+}
+
+function Extract-SourceEntries($value) {
+  $results = @()
+  if (-not $value) { return $results }
+
+  if ($value -is [string]) {
+    $results += [pscustomobject]@{ Source=$value; Extract=$null }
+    return $results
+  }
+
+  if ($value -isnot [System.Management.Automation.PSCustomObject]) { return $results }
+
+  $globalExtract = To-BoolOrNull ($value | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
+
+  $sourcesProp = $value | Select-Object -ExpandProperty sources -ErrorAction SilentlyContinue
+  if ($sourcesProp) {
+    $list = @()
+    if ($sourcesProp -is [System.Collections.IEnumerable] -and $sourcesProp -isnot [string]) { $list = @($sourcesProp) } else { $list = @($sourcesProp) }
+    foreach ($s in $list) {
+      if ($s -is [string]) {
+        $results += [pscustomobject]@{ Source=$s; Extract=$globalExtract }
+        continue
+      }
+      if ($s -isnot [System.Management.Automation.PSCustomObject]) { continue }
+      $srcVal = [string]($s | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
+      if (-not $srcVal) { $srcVal = [string]($s | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
+      if (-not $srcVal) { continue }
+      $extractVal = To-BoolOrNull ($s | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
+      if ($extractVal -eq $null) { $extractVal = $globalExtract }
+      $results += [pscustomobject]@{ Source=$srcVal; Extract=$extractVal }
+    }
+    return $results
+  }
+
+  $single = [string]($value | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
+  if (-not $single) { $single = [string]($value | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
+  if ($single) {
+    $results += [pscustomobject]@{ Source=$single; Extract=$globalExtract }
+  }
+  return $results
+}
+
+function Format-SourcesDisplay($sources) {
+  if (-not $sources -or $sources.Count -eq 0) { return '' }
+  if ($sources.Count -eq 1) {
+    $label = $sources[0].Source
+    if ($sources[0].Extract -eq $true) { return "$label (extract)" }
+    return $label
+  }
+  return "Multiple sources ($($sources.Count))"
+}
+
 function Pick-Folder([string]$startPath) {
   Add-Type -AssemblyName System.Windows.Forms
 
@@ -350,11 +405,11 @@ $xaml = @"
         <TextBlock Grid.Row='0' Grid.ColumnSpan='3' Text='Profile Details' Style='{StaticResource Heading}'/>
         <TextBlock Grid.Row='1' Grid.Column='0' Text='Name' Style='{StaticResource Label}'/>
         <TextBox   Grid.Row='1' Grid.Column='1' Name='txtName' Style='{StaticResource TextInput}'/>
-        <TextBlock Grid.Row='2' Grid.Column='0' Text='Source' Style='{StaticResource Label}'/>
-        <TextBox   Grid.Row='2' Grid.Column='1' Name='txtSource' Style='{StaticResource TextInput}'/>
+        <TextBlock Grid.Row='2' Grid.Column='0' Text='Sources (one per line)' Style='{StaticResource Label}'/>
+        <TextBox   Grid.Row='2' Grid.Column='1' Name='txtSource' Style='{StaticResource TextInput}' AcceptsReturn='True' VerticalScrollBarVisibility='Auto' MinHeight='80' TextWrapping='Wrap'/>
         <Button    Grid.Row='2' Grid.Column='2' Name='btnBrowse' Content='Browse' Style='{StaticResource BaseButton}' Margin='8,0,0,12'/>
-        <TextBlock Grid.Row='3' Grid.Column='0' Grid.ColumnSpan='2' Text='Tip: source can be a local folder or a URL (ZIPs auto-extract)' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
-        <CheckBox Grid.Row='3' Grid.Column='2' Name='chkExtract' Content='Extract non-zip URLs' Margin='8,0,0,8' VerticalAlignment='Center' />
+        <TextBlock Grid.Row='3' Grid.Column='0' Grid.ColumnSpan='2' Text='Tip: enter multiple sources on separate lines. URLs download; ZIPs auto-extract.' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
+        <CheckBox Grid.Row='3' Grid.Column='2' Name='chkExtract' Content='Extract non-zip URLs' Margin='8,0,0,8' VerticalAlignment='Center' IsThreeState='True' />
         <Grid Grid.Row='4' Grid.ColumnSpan='3'>
           <Grid.ColumnDefinitions>
            <ColumnDefinition Width='*'/>
@@ -426,21 +481,11 @@ function Refresh-Rows {
   $Rows.Clear()
   foreach ($k in $Profiles.Keys) {
     $v = $Profiles[$k]
-    $src = $null
-    $extract = $false
-    if ($v -is [string]) { $src = $v }
-    else {
-      $src = [string]($v | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
-      if (-not $src) { $src = [string]($v | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
-      if (-not $src) { $src = '' }
-      $extractValue = ($v | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
-      if ($null -ne $extractValue) {
-        try { $extract = [System.Convert]::ToBoolean($extractValue) } catch {}
-      }
-    }
+    $sources = Extract-SourceEntries $v
+    $src = Format-SourcesDisplay $sources
     $row = New-Object ProfileRow
     $row.Name   = $k
-    $row.Source = if ($extract) { "$src (extract)" } else { $src }
+    $row.Source = $src
     $Rows.Add($row) | Out-Null
   }
 }
@@ -467,21 +512,22 @@ function Load-Selected {
   $row  = [ProfileRow]$lv.SelectedItem
   $val  = $Profiles[$row.Name]
   $txtName.Text = $row.Name
-  if ($val -is [string]) {
-    $txtSource.Text = $val
-    $txtRen.Text    = ''
-    &$setIncludeBadge $null
-  }
-  else {
-    $src = [string]($val | Select-Object -ExpandProperty source -ErrorAction SilentlyContinue)
-    if (-not $src) { $src = [string]($val | Select-Object -ExpandProperty path -ErrorAction SilentlyContinue) }
-    $txtSource.Text = $src
-    $txtRen.Text    = Build-RenamesText ($val.renames)
-    &$setIncludeBadge ($val.renames)
-    $extractValue = ($val | Select-Object -ExpandProperty extract -ErrorAction SilentlyContinue)
-    if ($null -ne $extractValue) {
-      try { $chkExtract.IsChecked = [System.Convert]::ToBoolean($extractValue) } catch { $chkExtract.IsChecked = $false }
-    }
+
+  $sources = Extract-SourceEntries $val
+  $txtSource.Text = ($sources | ForEach-Object { $_.Source }) -join [Environment]::NewLine
+
+  $txtRen.Text    = Build-RenamesText ($val.renames)
+  &$setIncludeBadge ($val.renames)
+
+  $nonNullExtracts = @($sources | Where-Object { $_.Extract -ne $null })
+  if ($nonNullExtracts.Count -eq 0) {
+    $chkExtract.IsChecked = $false
+  } else {
+    $allTrue  = ($nonNullExtracts | Where-Object Extract -eq $true).Count -eq $nonNullExtracts.Count
+    $allFalse = ($nonNullExtracts | Where-Object Extract -eq $false).Count -eq $nonNullExtracts.Count
+    if ($allTrue)      { $chkExtract.IsChecked = $true }
+    elseif ($allFalse) { $chkExtract.IsChecked = $false }
+    else               { $chkExtract.IsChecked = $null }  # mixed
   }
   $script:SelectedProfileKey = $row.Name
 }
@@ -523,12 +569,13 @@ $btnRemove.Add_Click({ if (-not $lv.SelectedItem){return}; $name=([ProfileRow]$l
 
 function Save-Current-ToMap {
   $name = $txtName.Text.Trim()
-  $src  = $txtSource.Text.Trim()
+  $srcText  = $txtSource.Text
+  $srcLines = @($srcText -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
   if (-not $name) { [System.Windows.MessageBox]::Show("Name is required.","QuickPasta")|Out-Null; return $false }
-  if (-not $src)  { [System.Windows.MessageBox]::Show("Source is required (folder or URL).","QuickPasta")|Out-Null; return $false }
+  if ($srcLines.Count -eq 0)  { [System.Windows.MessageBox]::Show("Source is required (folder or URL).","QuickPasta")|Out-Null; return $false }
   $original = $script:SelectedProfileKey
   if ($Profiles.Contains($name) -and $original -ne $name) { [System.Windows.MessageBox]::Show("A profile with that name already exists.","QuickPasta")|Out-Null; return $false }
-  $extract = ($chkExtract.IsChecked -eq $true)
+  $extractState = $chkExtract.IsChecked  # $true / $false / $null (mixed)
   $rules = Parse-Renames $txtRen.Text
   if ($rules) {
     $rules = [object[]]$rules
@@ -557,25 +604,58 @@ function Save-Current-ToMap {
       $choice = [System.Windows.MessageBox]::Show($prompt,'QuickPasta',[System.Windows.MessageBoxButton]::YesNo,[System.Windows.MessageBoxImage]::Question)
       if ($choice -ne [System.Windows.MessageBoxResult]::Yes) { return $false }
     }
-    if ($extract) {
-      $value = [pscustomobject]@{ source=$src; renames=$rules; extract=$true }
-    } else {
-      $value = [pscustomobject]@{ source=$src; renames=$rules }
+  }
+
+  $existingSources = @()
+  if ($original -and $Profiles.Contains($original)) {
+    $existingSources = Extract-SourceEntries $Profiles[$original]
+  }
+
+  $value = $null
+  $builtSources = @()
+
+  if ($srcLines.Count -gt 1) {
+    for ($i=0; $i -lt $srcLines.Count; $i++) {
+      $line = $srcLines[$i]
+      $extractFlag = $null
+      if ($extractState -ne $null) { $extractFlag = $extractState }
+      elseif ($existingSources.Count -gt $i) { $extractFlag = $existingSources[$i].Extract }
+      $obj = [pscustomobject]@{ source=$line }
+      if ($extractFlag -eq $true) { $obj | Add-Member -NotePropertyName 'extract' -NotePropertyValue $true -Force }
+      $builtSources += $obj
     }
+    $value = [pscustomobject]@{ sources=$builtSources }
+    if ($rules) { $value | Add-Member -NotePropertyName 'renames' -NotePropertyValue $rules -Force }
   }
   else {
-    if ($extract) {
-      $value = [pscustomobject]@{ source=$src; extract=$true }
-    } else {
-      $value = $src
+    $singleSrc = $srcLines[0]
+    $extractFlagSingle = $null
+    if ($extractState -ne $null) { $extractFlagSingle = $extractState }
+    elseif ($existingSources.Count -gt 0) { $extractFlagSingle = $existingSources[0].Extract }
+
+    if ($rules) {
+      if ($extractFlagSingle -eq $true) {
+        $value = [pscustomobject]@{ source=$singleSrc; renames=$rules; extract=$true }
+      } else {
+        $value = [pscustomobject]@{ source=$singleSrc; renames=$rules }
+      }
     }
+    else {
+      if ($extractFlagSingle -eq $true) {
+        $value = [pscustomobject]@{ source=$singleSrc; extract=$true }
+      } else {
+        $value = $singleSrc
+      }
+    }
+    if (-not $builtSources) { $builtSources = @([pscustomobject]@{ Source=$singleSrc; Extract=$extractFlagSingle }) }
   }
+
   if ($original -and $Profiles.Contains($original) -and $original -ne $name) { $Profiles.Remove($original) | Out-Null }
   $Profiles[$name] = $value
   $targetRow = $null
   if ($original) { $targetRow = $Rows | Where-Object Name -eq $original | Select-Object -First 1 }
   if (-not $targetRow) { $targetRow = $Rows | Where-Object Name -eq $name | Select-Object -First 1 }
-  $displaySource = if ($extract) { "$src (extract)" } else { $src }
+  $displaySource = Format-SourcesDisplay $(if ($builtSources){$builtSources}else{Extract-SourceEntries $value})
   if ($targetRow) { $targetRow.Name = $name; $targetRow.Source = $displaySource }
   else { $row = New-Object ProfileRow; $row.Name=$name; $row.Source=$displaySource; $Rows.Add($row)|Out-Null; $targetRow = $row }
   $lv.SelectedItem = $targetRow
