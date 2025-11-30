@@ -197,6 +197,15 @@ function Format-SourcesDisplay($sources) {
   return "Multiple sources ($($sources.Count))"
 }
 
+function Is-Url([string]$s) { return ($s -match '^(https?|ftp)://') }
+
+function Has-UrlInSources($sources) {
+  foreach ($s in $sources) {
+    if (Is-Url $s.Source) { return $true }
+  }
+  return $false
+}
+
 function Pick-Folder([string]$startPath) {
   Add-Type -AssemblyName System.Windows.Forms
 
@@ -409,7 +418,10 @@ $xaml = @"
         <TextBox   Grid.Row='2' Grid.Column='1' Name='txtSource' Style='{StaticResource TextInput}' AcceptsReturn='True' VerticalScrollBarVisibility='Auto' MinHeight='80' TextWrapping='Wrap'/>
         <Button    Grid.Row='2' Grid.Column='2' Name='btnBrowse' Content='Browse' Style='{StaticResource BaseButton}' Margin='8,0,0,12'/>
         <TextBlock Grid.Row='3' Grid.Column='0' Grid.ColumnSpan='2' Text='Tip: enter multiple sources on separate lines. URLs download; ZIPs auto-extract.' Foreground='{StaticResource Muted}' Margin='4,0,0,8' TextWrapping='Wrap'/>
-        <CheckBox Grid.Row='3' Grid.Column='2' Name='chkExtract' Content='Extract non-zip URLs' Margin='8,0,0,8' VerticalAlignment='Center' IsThreeState='True' />
+        <StackPanel Grid.Row='3' Grid.Column='2' Orientation='Vertical' Margin='8,0,0,8' VerticalAlignment='Center'>
+          <CheckBox Name='chkExtract' Content='Extract non-zip URLs' IsThreeState='True' />
+          <CheckBox Name='chkSymlink' Content='Symlink' Margin='0,4,0,0'/>
+        </StackPanel>
         <Grid Grid.Row='4' Grid.ColumnSpan='3'>
           <Grid.ColumnDefinitions>
            <ColumnDefinition Width='*'/>
@@ -454,6 +466,7 @@ $txtName    = $window.FindName('txtName')
 $txtSource  = $window.FindName('txtSource')
 $txtRen     = $window.FindName('txtRen')
 $chkExtract = $window.FindName('chkExtract')
+$chkSymlink = $window.FindName('chkSymlink')
 $hintRen    = $window.FindName('hintRen')
 $badgeInclude = $window.FindName('badgeInclude')
 $btnBrowse  = $window.FindName('btnBrowse')
@@ -491,6 +504,16 @@ function Refresh-Rows {
 }
 $lv.ItemsSource = $Rows
 $script:SelectedProfileKey = $null
+$updateSymlinkToggle = {
+  param($sources, $symlinkValue)
+  $hasUrl = Has-UrlInSources $sources
+  $chkSymlink.IsEnabled = -not $hasUrl
+  if ($hasUrl -and $symlinkValue) {
+    $chkSymlink.IsChecked = $false
+  } elseif ($symlinkValue -ne $null) {
+    $chkSymlink.IsChecked = $symlinkValue
+  }
+}
 
 # equal columns at load / resize
 $initSized = $false; $padding = 40
@@ -502,6 +525,8 @@ $lv.Add_SizeChanged({ if ($initSized){ $cols=Get-Columns; if ($cols){ $gv,$c1,$c
 function Load-Selected {
   $script:SelectedProfileKey = $null
   $chkExtract.IsChecked = $false
+  $chkSymlink.IsChecked = $false
+  $chkSymlink.IsEnabled = $true
   if (-not $lv.SelectedItem) {
     $txtName.Clear()
     $txtSource.Clear()
@@ -529,6 +554,13 @@ function Load-Selected {
     elseif ($allFalse) { $chkExtract.IsChecked = $false }
     else               { $chkExtract.IsChecked = $null }  # mixed
   }
+  $symlinkFlag = $false
+  if ($val -is [System.Management.Automation.PSCustomObject]) {
+    try {
+      $symlinkFlag = [System.Convert]::ToBoolean($val.symlink)
+    } catch {}
+  }
+  &$updateSymlinkToggle $sources $symlinkFlag
   $script:SelectedProfileKey = $row.Name
 }
 $lv.Add_SelectionChanged({ Load-Selected })
@@ -540,6 +572,12 @@ $updateRenUi = {
   &$setIncludeBadge $parsedRen
 }
 $txtRen.Add_TextChanged($updateRenUi); $txtRen.Add_GotFocus($updateRenUi); $txtRen.Add_LostFocus($updateRenUi)
+$updateSourceUi = {
+  $lines = @($txtSource.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  $sourcesTmp = $lines | ForEach-Object { [pscustomobject]@{ Source=$_ } }
+  &$updateSymlinkToggle $sourcesTmp $chkSymlink.IsChecked
+}
+$txtSource.Add_TextChanged($updateSourceUi)
 # move ↑ / ↓
 function Move-Selected([int]$delta) {
   $i = $lv.SelectedIndex; if ($i -lt 0) { return }
@@ -564,7 +602,7 @@ $lv.Add_PreviewMouseDown({ $lv.Focus() })
 
 
 # add/remove/save
-$btnAdd.Add_Click({ $txtName.Text=''; $txtSource.Text=''; $txtRen.Text=''; $chkExtract.IsChecked=$false; &$setIncludeBadge $null; $lv.SelectedIndex=-1; $script:SelectedProfileKey = $null; $txtName.Focus() })
+$btnAdd.Add_Click({ $txtName.Text=''; $txtSource.Text=''; $txtRen.Text=''; $chkExtract.IsChecked=$false; $chkSymlink.IsChecked=$false; $chkSymlink.IsEnabled=$true; &$setIncludeBadge $null; $lv.SelectedIndex=-1; $script:SelectedProfileKey = $null; $txtName.Focus() })
 $btnRemove.Add_Click({ if (-not $lv.SelectedItem){return}; $name=([ProfileRow]$lv.SelectedItem).Name; $Profiles.Remove($name)|Out-Null; $Rows.Remove($lv.SelectedItem)|Out-Null })
 
 function Save-Current-ToMap {
@@ -576,6 +614,16 @@ function Save-Current-ToMap {
   $original = $script:SelectedProfileKey
   if ($Profiles.Contains($name) -and $original -ne $name) { [System.Windows.MessageBox]::Show("A profile with that name already exists.","QuickPasta")|Out-Null; return $false }
   $extractState = $chkExtract.IsChecked  # $true / $false / $null (mixed)
+  $symlinkState = ($chkSymlink.IsChecked -eq $true)
+
+  if ($symlinkState) {
+    foreach ($line in $srcLines) {
+      if (Is-Url $line) {
+        [System.Windows.MessageBox]::Show("Symlink mode only supports local sources (no URLs).","QuickPasta")|Out-Null
+        return $false
+      }
+    }
+  }
   $rules = Parse-Renames $txtRen.Text
   if ($rules) {
     $rules = [object[]]$rules
@@ -625,6 +673,7 @@ function Save-Current-ToMap {
       $builtSources += $obj
     }
     $value = [pscustomobject]@{ sources=$builtSources }
+    if ($symlinkState) { $value | Add-Member -NotePropertyName 'symlink' -NotePropertyValue $true -Force }
     if ($rules) { $value | Add-Member -NotePropertyName 'renames' -NotePropertyValue $rules -Force }
   }
   else {
@@ -639,10 +688,13 @@ function Save-Current-ToMap {
       } else {
         $value = [pscustomobject]@{ source=$singleSrc; renames=$rules }
       }
+      if ($symlinkState) { $value | Add-Member -NotePropertyName 'symlink' -NotePropertyValue $true -Force }
     }
     else {
-      if ($extractFlagSingle -eq $true) {
-        $value = [pscustomobject]@{ source=$singleSrc; extract=$true }
+      if ($extractFlagSingle -eq $true -or $symlinkState) {
+        $value = [pscustomobject]@{ source=$singleSrc }
+        if ($extractFlagSingle -eq $true) { $value | Add-Member -NotePropertyName 'extract' -NotePropertyValue $true -Force }
+        if ($symlinkState) { $value | Add-Member -NotePropertyName 'symlink' -NotePropertyValue $true -Force }
       } else {
         $value = $singleSrc
       }

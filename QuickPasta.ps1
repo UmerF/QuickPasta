@@ -174,7 +174,7 @@ function Ensure-SevenZipPortable {
   return $null
 }
 
-function Invoke-IncludeRules([string]$sourceRoot, [string]$targetRoot, [object[]]$includeRules) {
+function Invoke-IncludeRules([string]$sourceRoot, [string]$targetRoot, [object[]]$includeRules, [switch]$SymlinkMode) {
   if (-not $includeRules -or $includeRules.Count -eq 0) { return }
 
   foreach ($rule in $includeRules) {
@@ -223,8 +223,16 @@ function Invoke-IncludeRules([string]$sourceRoot, [string]$targetRoot, [object[]
     }
 
     try {
-      Copy-Item -LiteralPath $chosen.FullName -Destination $destFull -Force
-      LogInfo ("Include copy: '{0}' -> '{1}'" -f $chosen.FullName, $destFull)
+      if ($SymlinkMode) {
+        if (-not (New-Link -targetPath $chosen.FullName -destPath $destFull)) {
+          throw "link failed"
+        }
+        LogInfo ("Include link: '{0}' -> '{1}'" -f $chosen.FullName, $destFull)
+      }
+      else {
+        Copy-Item -LiteralPath $chosen.FullName -Destination $destFull -Force
+        LogInfo ("Include copy: '{0}' -> '{1}'" -f $chosen.FullName, $destFull)
+      }
     }
     catch {
       LogError ("Include copy failed '{0}' -> '{1}': {2}" -f $chosen.FullName, $destFull, $_.Exception.Message)
@@ -499,6 +507,55 @@ function To-BoolOrNull($value) {
   try { return [System.Convert]::ToBoolean($value) } catch { return $null }
 }
 
+function Is-Url([string]$s) { Test-Url $s }
+
+function New-Link([string]$targetPath, [string]$destPath) {
+  try {
+    $destParent = Split-Path $destPath -Parent
+    if ($destParent -and -not (Test-Path -LiteralPath $destParent)) {
+      New-Item -ItemType Directory -Path $destParent -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $destPath) {
+      $existing = Get-Item -LiteralPath $destPath -ErrorAction SilentlyContinue
+      if ($existing) { $existing.Attributes = 'Normal' }
+      Remove-Item -LiteralPath $destPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $isDir = (Test-Path -LiteralPath $targetPath -PathType Container)
+    $itemType = if ($isDir) { 'Junction' } else { 'SymbolicLink' }
+    New-Item -ItemType $itemType -Path $destPath -Target $targetPath -Force | Out-Null
+    LogInfo ("Link created: {0} -> {1}" -f $destPath, $targetPath)
+    return $true
+  }
+  catch {
+    LogError ("Failed to create link '{0}' -> '{1}': {2}" -f $destPath, $targetPath, $_.Exception.Message)
+    return $false
+  }
+}
+
+function Test-SymlinkPrivilege {
+  $tmpRoot = Join-Path $env:TEMP ('QP_LinkTest_' + [guid]::NewGuid().ToString('N'))
+  $ok = $false
+  try {
+    New-Item -ItemType Directory -Path $tmpRoot -Force | Out-Null
+    $target = Join-Path $tmpRoot 'target.tmp'
+    $link   = Join-Path $tmpRoot 'link.tmp'
+    Set-Content -LiteralPath $target -Value 'test' -Encoding ASCII
+    New-Item -ItemType SymbolicLink -Path $link -Target $target -Force -ErrorAction Stop | Out-Null
+    $ok = $true
+  }
+  catch {
+    $ok = $false
+  }
+  finally {
+    try {
+      if (Test-Path -LiteralPath $tmpRoot) {
+        Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+      }
+    } catch {}
+  }
+  return $ok
+}
+
 function Resolve-SourceEntries($entry) {
   # Returns a list of objects @{ Source = "..."; Extract = $true/$false/$null }
   $results = @()
@@ -593,6 +650,7 @@ try {
   $sourceItems = @()
   $renameRules = $null
   $includeRules = @()
+  $symlinkMode = $false
   $sourceItems = Resolve-SourceEntries -entry $entry
 
   if ($entry -is [System.Management.Automation.PSCustomObject]) {
@@ -609,6 +667,9 @@ try {
         $renameRules = @($renameRules | Where-Object { ([string]$_.from).Trim() -ine '@include' })
       }
     }
+
+    $symlinkFlag = To-BoolOrNull ($entry | Select-Object -ExpandProperty symlink -ErrorAction SilentlyContinue)
+    if ($symlinkFlag -eq $true) { $symlinkMode = $true }
   }
   elseif ($entry -is [string]) {
     # already handled
@@ -620,6 +681,17 @@ try {
   $targetPath = Get-TargetFolder -path $Target
 
   $includeOnly = ($includeRules.Count -gt 0 -and ($null -eq $renameRules -or $renameRules.Count -eq 0))
+
+  if ($symlinkMode) {
+    $hasRemote = $false
+    foreach ($s in $sourceItems) {
+      if (Is-Url $s.Source) { $hasRemote = $true; break }
+    }
+    if ($hasRemote) { throw "Symlink mode only supports local sources." }
+    if (-not (Test-SymlinkPrivilege)) {
+      throw "Symlink mode requires the 'Create symbolic links' privilege. Enable Developer Mode and sign out/in, or run elevated."
+    }
+  }
 
   $tempWorkItems   = @()
   $resolvedSources = @()
@@ -657,9 +729,18 @@ try {
       }
       else {
         foreach ($item in $itemsToCopy) {
-          Copy-Item -LiteralPath $item.FullName -Destination $targetPath -Recurse -Force
+          $dest = Join-Path $targetPath $item.Name
+          if ($symlinkMode) {
+            if (-not (New-Link -targetPath $item.FullName -destPath $dest)) { throw "Failed to create link for $($item.FullName)" }
+          } else {
+            Copy-Item -LiteralPath $item.FullName -Destination $targetPath -Recurse -Force
+          }
         }
-        LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+        if ($symlinkMode) {
+          LogInfo "Linked: '$sourcePath' -> '$targetPath' (done)"
+        } else {
+          LogInfo "Copy: '$sourcePath' -> '$targetPath' (done)"
+        }
       }
     }
     else {
@@ -669,7 +750,7 @@ try {
 
   if ($includeRules.Count -gt 0) {
     foreach ($src in $resolvedSources) {
-      Invoke-IncludeRules -sourceRoot $src.Path -targetRoot $targetPath -includeRules $includeRules
+      Invoke-IncludeRules -sourceRoot $src.Path -targetRoot $targetPath -includeRules $includeRules -SymlinkMode:$symlinkMode
     }
   }
 

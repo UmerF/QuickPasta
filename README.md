@@ -33,6 +33,7 @@ It ships with a polished **GUI Manager** to create, reorder, and install your me
 
 - **Powerful profiles**
   - Source can be a **local folder**, a **ZIP URL** (auto-download & extract), or any **HTTP(S) file** (with optional extraction). Add **multiple sources in one profile** (processed in order).
+  - Optional **Symlink mode** for local sources (junctions for folders, symlinks for files) to place links instead of copies.
   - Optional **rename rules** (e.g., `ReShade64.dll -> dxgi.dll` or `*.cfg, settings.cfg`).
   - Profiles are stored in `profiles.json` in the **same order** you see in the Manager.
 
@@ -52,6 +53,7 @@ It ships with a polished **GUI Manager** to create, reorder, and install your me
 3. Add a profile:
    - **Name** – label shown in the submenu.
    - **Source** - a **local folder**, a **ZIP** URL (`https://...`), or any **HTTP(S)** file. Add multiple sources on separate lines.
+   - **Symlink** (checkbox) - for local-only profiles, create links instead of copying.
    - **Extract non-zip URLs** – optional; enable this for self-extracting downloads you want unpacked automatically.
    - **Renames** – optional (one rule per line; see syntax below).
 4. Click **Save**.
